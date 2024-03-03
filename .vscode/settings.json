@@ -1,0 +1,33 @@
+{
+    "files.associations": {
+        "main.h": "c",
+        "mpu6050.h": "c",
+        "retarget.h": "c",
+        "stm32f4xx_hal.h": "c",
+        "ned_coordinates.h": "c",
+        "nrf24l01.h": "c",
+        "stm32f4xx_hal_spi.h": "c",
+        "start.h": "c",
+        "stm32f4xx_hal_i2c.h": "c",
+        "bmp280.h": "c",
+        "string_utils.h": "c",
+        "pid.h": "c",
+        "ms5611.h": "c",
+        "qmc5883l.h": "c",
+        "bmp680.h": "c",
+        "mpl3115a2.h": "c",
+        "bn357.h": "c",
+        "ff.h": "c",
+        "ff_gen_drv.h": "c",
+        "fatfs_sd.h": "c",
+        "fatfs.h": "c",
+        "diskio.h": "c",
+        "sd_card.h": "c",
+        "integer.h": "c"
+    },
+    "cSpell.words": [
+        "FATFS",
+        "FILINFO",
+        "FRESULT"
+    ]
+}
