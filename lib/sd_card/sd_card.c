@@ -5,8 +5,7 @@ FIL sd_file; // Handle of the file that is opened
 FILINFO sd_file_info; // info about the file
 FRESULT sd_result; // to store result
 
-#define BUFFER_SIZE 1024
-char sd_buffer[BUFFER_SIZE];
+char sd_buffer[SD_BUFFER_SIZE];
 uint16_t sd_buffer_index = 0;
 
 UINT sd_bytes_read, sd_bytes_written; // FIle read/write count
@@ -17,12 +16,10 @@ DWORD sd_free_clusters; // Amount of smallest logical disk space units.
 uint32_t sd_total_space, sd_free_space;
 
 
-#define SD_CARD_DEBUG TRUE
+#define SD_CARD_DEBUG 0
 
-int sd_buffer_size(char *buffer){
-    int i=0;
-    while(*buffer++ != '\0') i++;
-    return i;
+uint16_t sd_buffer_size(void){
+    return strlen(sd_buffer);
 }
 
 void sd_buffer_clear(void){
@@ -161,9 +158,9 @@ void sd_card_append_to_buffer(const char *string_format, ...){
     va_list args;
     va_start(args, string_format);
     // Ensure we don't write beyond the buffer
-    int written = vsnprintf(&sd_buffer[sd_buffer_index], BUFFER_SIZE - sd_buffer_index, string_format, args);
+    int written = vsnprintf(&sd_buffer[sd_buffer_index], SD_BUFFER_SIZE - sd_buffer_index, string_format, args);
     if (written > 0) {
-        sd_buffer_index += written < (BUFFER_SIZE - sd_buffer_index) ? written : (BUFFER_SIZE - sd_buffer_index - 1);
+        sd_buffer_index += written < (SD_BUFFER_SIZE - sd_buffer_index) ? written : (SD_BUFFER_SIZE - sd_buffer_index - 1);
     }
     va_end(args);
 }

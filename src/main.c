@@ -11,33 +11,36 @@ UART_HandleTypeDef huart1;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
-static void MX_I2C1_Init(void);
-static void MX_USART2_UART_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI3_Init(void);
-static void MX_TIM1_Init(void);
-static void MX_TIM2_Init(void);
 /* Actual functional code -----------------------------------------------*/
+
+
 
 #include "../lib/printf/retarget.h"
 #include "stdio.h"
 #include "string.h"
-
+#include <stdint.h>
+#include <stdlib.h>
 
 #include "../lib/sd_card/sd_card.h"
 
+void init_loop_timer();
+void handle_loop_timing();
+void init_STM32_peripherals();
+
 // SPI1 pins
+// PA4  SPI1 SS
 // PA5  SPI1 SCK
 // PA6  SPI1 MISO
 // PA7  SPI1 MOSI
-
 
 // SPI3 pins
 // PB3  SPI3 SCK
 // PB4  SPI3 MISO
 // PB5  SPI3 MOSI
+// 
 
 #define REFRESH_RATE_HZ 1
 
@@ -56,73 +59,440 @@ uint8_t log_file_location_found = 0;
 uint8_t sd_card_initialized = 0;
 uint8_t log_loop_count = 0;
 
+
+// SPI slave stuff functionality
+
+#define SLAVE_BUFFER_SIZE 100
+uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
+
+uint8_t dummy_buffer[SLAVE_BUFFER_SIZE];
+
+
+
+// void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+// {
+//     if (hspi->Instance == SPI1)
+//     {
+
+//         // sd_card_append_to_buffer("Got stuff from master ");
+//         // sd_card_append_to_buffer("\n");
+//         // Handle the received data
+//         uint8_t test = slave_buffer[0];
+//         if(test == 1){
+//             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+//         }else{
+//             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+//         }
+//         printf("Test, %d\n", test);
+//         HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
+
+//     }
+//     printf("Test\n");
+// }
+
+// void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+// {
+//     uint8_t spi_error_code = hspi->ErrorCode;
+
+//     if (hspi->Instance == SPI1) // Check if the callback is for SPI1
+//     {
+//         uint8_t spi_data_register = hspi->Instance->DR;
+//         uint8_t spi_status_register = hspi->Instance->SR;
+//         (void)spi_data_register;
+//         (void)spi_status_register;
+
+//         // Code to handle SPI1 error
+//         printf("Error test: %d\n", spi_error_code);
+//         HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
+//     }
+//     printf("Test\n");
+// }
+
+// enum t_power_management {
+//     LOGGER_SD_BUFFER_SIZE    = 0b10000000,
+//     LOGGER_SD_BUFFER_CLEAR    = 0b10000000,
+//     LOGGER_SD_CARD_INITIALIZE    = 0b10000000,
+//     LOGGER_SD_OPEN_FILE    = 0b10000000,
+//     LOGGER_SD_WRITE_DATA_TO_FILE    = 0b10000000,
+//     LOGGER_SD_READ_DATA_FORM_FILE    = 0b10000000,
+//     LOGGER_SD_SET_FILE_CURSOR_OFFSET    = 0b10000000,
+//     LOGGER_SD_CLOSE_FILE    = 0b10000000,
+//     LOGGER_SD_CARD_DEINITIALIZE    = 0b10000000,
+//     LOGGER_SD_CARD_APPEND_TO_BUFFER    = 0b10000000,
+//     LOGGER_SD_GET_BUFFER_POINTER    = 0b10000000,
+//     LOGGER_SD_GET_SELECTED_FILE_SIZE    = 0b10000000,
+//     LOGGER_SD_WRITE_BUFFER_TO_FILE    = 0b10000000,
+//     LOGGER_SD_FILE_EXISTS    = 0b10000000,
+//     LOGGER_SD_SAVE_FILE    = 0b10000000,
+
+//     LOGGER_INITIALIZE    = 0b10000000,
+//     LOGGER_RESET    = 0b10000000,
+//     LOGGER_WRITE_CHUNK_OF_DATA = 0b10000000,
+//     LOGGER_CHECK_READY = 0b10000000,
+// };'
+
+
+/**
+ * Extracts and returns a dynamically allocated string from SPI received data starting from a specific index.
+ * The function assumes the first byte of interest (at the specified index) is the start of the string.
+ * 
+ * @param data The received SPI data buffer.
+ * @param size The size of the received SPI data buffer.
+ * @param startIndex The index to start looking for the string.
+ * @return A pointer to a dynamically allocated string. The caller is responsible
+ *         for freeing this memory using free(). Returns NULL if the function fails.
+ */
+char* extract_string_from_spi_data_at_index(uint8_t* data, size_t size, size_t startIndex) {
+    if (startIndex >= size || startIndex + 1 > size) { // Ensure startIndex is within bounds and leaves room for null terminator
+        return NULL;
+    }
+
+    // Calculate the length of the string starting from startIndex
+    size_t stringLength = strlen((char*)&data[startIndex]);
+    if (stringLength + startIndex >= size) { // Ensure string is null-terminated within bounds
+        return NULL;
+    }
+
+    // Allocate memory for the string
+    char* string = (char*)malloc(stringLength + 1); // +1 for null terminator
+    if (string == NULL) {
+        // Memory allocation failed
+        return NULL;
+    }
+
+    // Copy the string from the SPI data starting at startIndex
+    strncpy(string, (char*)&data[startIndex], stringLength + 1);
+
+    return string;
+}
+
+
+
 int main(void){
     init_STM32_peripherals();
 
     // Try to initialize the file and test some 
 
-    sd_card_initialized = sd_card_initialize();
-    if(sd_card_initialized){
-        printf("Looking for viable log file.\n");
-        do{
-            uint16_t log_file_name_length = sprintf(log_file_name, "%d%s", log_file_index, log_file_base_name);
 
-            // Quit of the string is too big
-            if(log_file_name_length > LOG_FILE_NAME_MAX){
-                printf("Log file string too long\n");
-                return 0;
-            }
-            printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
-            log_file_location_found = !sd_file_exists(log_file_name);
-            log_file_index++;
-        }
-        while(!log_file_location_found);
-        printf("Found viable log file.\n");
-        sd_open_file(log_file_name, FA_WRITE | FA_READ | FA_OPEN_ALWAYS);
-        sd_close_file();
+    // HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
 
-        sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
-        sd_set_file_cursor_offset(sd_card_get_selected_file_size());
-    }
+    // sd_card_initialized = sd_card_initialize();
+    // if(sd_card_initialized){
+    //     printf("Looking for viable log file.\n");
+    //     do{
+    //         uint16_t log_file_name_length = sprintf(log_file_name, "%d%s", log_file_index, log_file_base_name);
+
+    //         // Quit of the string is too big
+    //         if(log_file_name_length > LOG_FILE_NAME_MAX){
+    //             printf("Log file string too long\n");
+    //             return 0;
+    //         }
+    //         printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
+    //         log_file_location_found = !sd_file_exists(log_file_name);
+    //         log_file_index++;
+    //     }
+    //     while(!log_file_location_found);
+    //     printf("Found viable log file.\n");
+    //     sd_open_file(log_file_name, FA_WRITE | FA_READ | FA_OPEN_ALWAYS);
+    //     sd_close_file();
+
+    //     sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
+    //     sd_set_file_cursor_offset(sd_card_get_selected_file_size());
+    // }
+
 
 
     printf("Looping\n");
     init_loop_timer();
     while (1){
 
-        if(sd_card_initialized){
-            sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-            sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-            sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-            sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-            sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-            sd_card_append_to_buffer("\n");
-            
-            // printf(" Logged data to SD buffer. ");
-            log_loop_count++;
+        HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 1, 1000);
+        // HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_TransmitReceive(&hspi1, dummy_buffer, slave_buffer, 1, 1000);
+
+        
+        if(spi_slave_result_receive == HAL_OK){// || spi_slave_result_receive == HAL_TIMEOUT){
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+            switch (slave_buffer[0])
+            {
+                case LOGGER_SD_BUFFER_SIZE:
+                {
+                    uint16_t result = sd_buffer_size();
+                    uint8_t result_array[] = {
+                        (result >> 8) & 0xFF, 
+                        result & 0xFF
+                    };
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, result_array, 2, 100);
+                    break;
+                }
+                case LOGGER_SD_BUFFER_CLEAR:
+                {
+                    sd_buffer_clear();
+                    uint8_t result = 1; // Just to confirm that it is completed
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_CARD_INITIALIZE:
+                {
+                    uint8_t result = sd_card_initialize();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_OPEN_FILE:
+                {
+                    volatile HAL_StatusTypeDef status_receive;
+
+                    // We ask how much data should we receive. 
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if((status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000)) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+                    volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the instruction and file name
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if( (status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000)) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+
+                    // instruction is byte 0
+                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 1);
+
+                    volatile uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, slave_buffer, amount_of_data_to_receive, 100);
+                    free(extracted_string);
+                    break;
+                }
+                case LOGGER_SD_WRITE_DATA_TO_FILE:
+                {   
+                    // We ask how much data should we receive. 
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the data
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+                    uint8_t result = sd_write_data_to_file(extracted_string);
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    free(extracted_string);
+                    break;
+                }
+                case LOGGER_SD_READ_DATA_FORM_FILE:
+                {
+                    uint8_t result = sd_read_data_from_file();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_SET_FILE_CURSOR_OFFSET:
+                {
+                    // Receive 4 bytes because need 32 bit number
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 4, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+                    uint32_t number = (slave_buffer[0] << 24) | 
+                        (slave_buffer[1] << 16) | 
+                        (slave_buffer[2] << 8) | 
+                        slave_buffer[3];
+
+                    uint8_t result = sd_set_file_cursor_offset(number);
+
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_CLOSE_FILE:
+                {
+                    uint8_t result = sd_close_file();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_CARD_DEINITIALIZE:
+                {
+                    uint8_t result = sd_card_deinitialize();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_CARD_APPEND_TO_BUFFER:
+                {
+                    // We ask how much data should we receive. 
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the data
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+                    sd_card_append_to_buffer(extracted_string);
+                    free(extracted_string);
+                    uint8_t result = 1; // Just to confirm that it is completed
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_GET_BUFFER_POINTER:
+                {   
+                    // Get the data
+                    char* sd_buffer = sd_card_get_buffer_pointer();
+                    char* extracted_string = extract_string_from_spi_data_at_index((uint8_t*)sd_buffer, SD_BUFFER_SIZE, 0);
+
+                    
+                    uint16_t amount_of_data_to_transmit = sd_buffer_size()+1;
+                    uint8_t amount_of_data_to_transmit_bytes[] = {(amount_of_data_to_transmit >> 8) & 0xFF, amount_of_data_to_transmit & 0xFF}; 
+
+                    // Tell how much data will be sent
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Transmit(&hspi1, amount_of_data_to_transmit_bytes, 2, 100) != HAL_OK) {
+                        free(extracted_string);
+                        break;
+                    }
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+                    // Send the data
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, (uint8_t*)extracted_string, amount_of_data_to_transmit, 100);
+                    free(extracted_string);
+                    break;
+                }
+                case LOGGER_SD_GET_SELECTED_FILE_SIZE:
+                {
+                    uint32_t result = sd_card_get_selected_file_size();
+                    uint8_t result_array[] = {
+                        (result >> 24) & 0xFF, 
+                        (result >> 16) & 0xFF, 
+                        (result >> 8) & 0xFF, 
+                        result & 0xFF
+                    };
+
+                    // It knows to receive 4 bytes
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, result_array, 4, 100);
+                    break;
+                }
+                case LOGGER_SD_WRITE_BUFFER_TO_FILE:
+                {
+                    uint8_t result = sd_write_buffer_to_file();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_FILE_EXISTS:
+                {
+                    // We ask how much data should we receive. 
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the file name
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+                    uint8_t result = sd_file_exists(extracted_string);
+                    free(extracted_string);
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+                case LOGGER_SD_SAVE_FILE:
+                {
+                    uint8_t result = sd_save_file();
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    break;
+                }
+
+
+
+                case LOGGER_INITIALIZE:
+                {
+                    break;
+                }
+                case LOGGER_RESET:
+                {
+                    break;
+                }
+                case LOGGER_WRITE_CHUNK_OF_DATA:
+                {
+                    break;
+                }
+                case LOGGER_CHECK_READY:
+                {
+                    break;
+                }
+                default:
+                    // if(slave_buffer[0] == 1){
+                    //     uint8_t result = 1;
+                    //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+                    //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    // }else if(slave_buffer[0] == 0){
+                    //     uint8_t result = 1;
+                    //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+                    //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    // }
+                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    break;
+            }
+        }else{
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
         }
-
-
-        if(sd_card_initialized && log_loop_count > 0){
-            // sd_card_initialize();
-
-            sd_close_file();
-            sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
-            sd_set_file_cursor_offset(sd_card_get_selected_file_size());
-            sd_card_initialized = sd_write_buffer_to_file();
-            sd_save_file();
-            // sd_close_file();
-            sd_buffer_clear();
-            log_loop_count = 0;
-
-            // sd_card_deinitialize();
+        
+        
+        // if(sd_card_initialized){
+        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
+        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
+        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
+        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
+        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
+        //     sd_card_append_to_buffer("\n");
             
-            // printf(" Logged data from buffer to SD. ");
-        }
+        //     // printf(" Logged data to SD buffer. ");
+        //     log_loop_count++;
+        // }
 
-        printf("\n");
 
-        handle_loop_timing();
+        // if(sd_card_initialized && log_loop_count > 0){
+        //     // sd_card_initialize();
+
+        //     sd_close_file();
+        //     sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
+        //     sd_set_file_cursor_offset(sd_card_get_selected_file_size());
+        //     sd_card_initialized = sd_write_buffer_to_file();
+        //     sd_save_file();
+        //     // sd_close_file();
+        //     sd_buffer_clear();
+        //     log_loop_count = 0;
+
+        //     // sd_card_deinitialize();
+            
+        //     // printf(" Logged data from buffer to SD. ");
+        // }
+
+        // handle_loop_timing();
+        // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
     }
 }
 
@@ -130,7 +500,6 @@ void init_STM32_peripherals(){
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 0);
 
     HAL_Delay(1);
     MX_SPI1_Init();
@@ -140,9 +509,12 @@ void init_STM32_peripherals(){
     RetargetInit(&huart1);
     MX_FATFS_Init();
 
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+    
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 }
 
 void init_loop_timer(){
@@ -176,6 +548,7 @@ void track_time(){
 }
 
 /* Auto generated shit again-----------------------------------------------*/
+
 
 /**
   * @brief System Clock Configuration
@@ -239,13 +612,23 @@ static void MX_SPI1_Init(void)
   /* USER CODE END SPI1_Init 1 */
   /* SPI1 parameter configuration*/
   hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Mode = SPI_MODE_SLAVE;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+
+// High - 1 edge  Not good, it gets the correct command but not the ones afterwards
+// high - 2 edge  Not good at all.
+// low  - 1 edge current Not very good
+// low  - 2 edge Worked very good, but some data was missing. Literally bytes missing
+
+// High - 1 edge 
+// high - 2 edge 
+// low  - 1 edge current
+// low  - 2 edge Same as normal one
+
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi1.Init.NSS = SPI_NSS_HARD_INPUT;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -277,12 +660,13 @@ static void MX_SPI3_Init(void)
   /* USER CODE END SPI3_Init 1 */
   /* SPI3 parameter configuration*/
   hspi3.Instance = SPI3;
-  hspi3.Init.Mode = SPI_MODE_SLAVE;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
   hspi3.Init.Direction = SPI_DIRECTION_2LINES;
   hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi3.Init.NSS = SPI_NSS_HARD_INPUT;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -353,6 +737,16 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+
+
+  /*Configure GPIO pin : PA3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
