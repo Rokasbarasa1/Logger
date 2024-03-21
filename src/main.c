@@ -4,13 +4,14 @@
 
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi3;
-
-TIM_HandleTypeDef htim1;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 UART_HandleTypeDef huart1;
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI3_Init(void);
@@ -61,76 +62,9 @@ uint8_t log_loop_count = 0;
 
 
 // SPI slave stuff functionality
-
 #define SLAVE_BUFFER_SIZE 100
 uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
-
 uint8_t dummy_buffer[SLAVE_BUFFER_SIZE];
-
-
-
-// void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
-// {
-//     if (hspi->Instance == SPI1)
-//     {
-
-//         // sd_card_append_to_buffer("Got stuff from master ");
-//         // sd_card_append_to_buffer("\n");
-//         // Handle the received data
-//         uint8_t test = slave_buffer[0];
-//         if(test == 1){
-//             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-//         }else{
-//             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-//         }
-//         printf("Test, %d\n", test);
-//         HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
-
-//     }
-//     printf("Test\n");
-// }
-
-// void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
-// {
-//     uint8_t spi_error_code = hspi->ErrorCode;
-
-//     if (hspi->Instance == SPI1) // Check if the callback is for SPI1
-//     {
-//         uint8_t spi_data_register = hspi->Instance->DR;
-//         uint8_t spi_status_register = hspi->Instance->SR;
-//         (void)spi_data_register;
-//         (void)spi_status_register;
-
-//         // Code to handle SPI1 error
-//         printf("Error test: %d\n", spi_error_code);
-//         HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
-//     }
-//     printf("Test\n");
-// }
-
-// enum t_power_management {
-//     LOGGER_SD_BUFFER_SIZE    = 0b10000000,
-//     LOGGER_SD_BUFFER_CLEAR    = 0b10000000,
-//     LOGGER_SD_CARD_INITIALIZE    = 0b10000000,
-//     LOGGER_SD_OPEN_FILE    = 0b10000000,
-//     LOGGER_SD_WRITE_DATA_TO_FILE    = 0b10000000,
-//     LOGGER_SD_READ_DATA_FORM_FILE    = 0b10000000,
-//     LOGGER_SD_SET_FILE_CURSOR_OFFSET    = 0b10000000,
-//     LOGGER_SD_CLOSE_FILE    = 0b10000000,
-//     LOGGER_SD_CARD_DEINITIALIZE    = 0b10000000,
-//     LOGGER_SD_CARD_APPEND_TO_BUFFER    = 0b10000000,
-//     LOGGER_SD_GET_BUFFER_POINTER    = 0b10000000,
-//     LOGGER_SD_GET_SELECTED_FILE_SIZE    = 0b10000000,
-//     LOGGER_SD_WRITE_BUFFER_TO_FILE    = 0b10000000,
-//     LOGGER_SD_FILE_EXISTS    = 0b10000000,
-//     LOGGER_SD_SAVE_FILE    = 0b10000000,
-
-//     LOGGER_INITIALIZE    = 0b10000000,
-//     LOGGER_RESET    = 0b10000000,
-//     LOGGER_WRITE_CHUNK_OF_DATA = 0b10000000,
-//     LOGGER_CHECK_READY = 0b10000000,
-// };'
-
 
 /**
  * Extracts and returns a dynamically allocated string from SPI received data starting from a specific index.
@@ -167,77 +101,203 @@ char* extract_string_from_spi_data_at_index(uint8_t* data, size_t size, size_t s
 }
 
 
+// uint8_t current_instruction = 0x00;
+// uint8_t current_instruction_phase = 0;
+
+void slave_set_busy(){
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+}
+
+void slave_set_free(){
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+}
+
+// volatile uint16_t amount_of_data_to_receive = 0;
+
+uint8_t received_data = 0;
+uint8_t transmitted_data = 0;
+uint8_t transmit_receive_error = 0;
+
+uint8_t wait_for_receive(){
+    received_data = 0;
+    while (received_data == 0 && hspi1.State != HAL_SPI_STATE_READY){
+        asm("NOP");
+    };
+    return 1;
+}
+
+uint8_t wait_for_transmit(){
+    transmitted_data = 0;
+    while (transmitted_data == 0 && hspi1.State != HAL_SPI_STATE_READY){
+        asm("NOP");
+    }
+    return 1;
+}
+
+uint8_t wait_for_not_busy(){
+    while (hspi1.State != HAL_SPI_STATE_READY){
+        asm("NOP");
+    }
+    return 1;
+}
+
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi)
+{
+    if (hspi->Instance == SPI1){
+        received_data = 1;
+        slave_set_busy();
+        slave_set_free();
+        // if(current_instruction == 0x00 && slave_buffer[0] >= MIN_SD_COMMAND && slave_buffer[0] <= MAX_SD_COMMAND){
+        //     current_instruction = slave_buffer[0];
+        // }
+
+        // if(current_instruction != 0x00){
+        //     slave_set_busy();
+        //     switch (slave_buffer[0])
+        //     {
+        //         case LOGGER_SD_CARD_INITIALIZE:
+        //         {
+        //             uint8_t result = sd_card_initialize();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //             current_instruction = 0;
+        //             current_instruction_phase = 0;
+        //             break;
+        //         }
+        //         case LOGGER_SD_OPEN_FILE:
+        //         {
+        //             volatile HAL_StatusTypeDef status_receive;
+        //             if(current_instruction_phase == 0){
+        //                 // We ask how much data should we receive. 
+        //                 slave_set_free();
+        //                 HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
+        //                 current_instruction_phase = 1;
+        //             }else if(current_instruction_phase == 1){
+        //                 slave_set_busy();
+        //                 amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+        //                 // Receive the instruction and file name
+        //                 slave_set_free();
+        //                 HAL_SPI_Receive_DMA(&hspi1, slave_buffer, amount_of_data_to_receive);
+        //                 current_instruction_phase = 2;
+        //             }else if(current_instruction_phase == 2){
+        //                 slave_set_busy();
+                        
+        //                 // instruction is byte 0
+        //                 char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 1);
+        //                 volatile uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
+        //                 slave_set_free();
+        //                 HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //                 // slave_set_busy();
+        //                 // slave_set_free();
+        //                 HAL_SPI_Transmit_DMA(&hspi1, slave_buffer, amount_of_data_to_receive);
+        //                 free(extracted_string);
+        //                 current_instruction = 0;
+        //                 current_instruction_phase = 0;
+        //                 amount_of_data_to_receive = 0;
+        //             }
+        //             break;
+        //         }
+        //         case LOGGER_SD_CLOSE_FILE:
+        //         {
+        //             uint8_t result = sd_close_file();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //             current_instruction = 0;
+        //             current_instruction_phase = 0;
+        //             break;
+        //         }
+        //         default:
+        //         {
+        //             current_instruction = 0;
+        //             current_instruction_phase = 0;
+        //             amount_of_data_to_receive = 0;
+        //             break;
+        //         }
+        //     }
+        // }else{
+        //     slave_set_free();
+        //     HAL_SPI_Receive_IT(&hspi1, slave_buffer, 1);
+
+        //     // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
+        // }
+
+
+
+        // printf("%d\n", slave_buffer[0]);
+        // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
+        // HAL_SPI_Transmit_DMA(&hspi1, slave_buffer, 1);
+    }
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi){
+    if (hspi->Instance == SPI1){
+        transmit_receive_error = 1;
+        slave_set_busy();
+        slave_set_free();
+        printf("%d\n", slave_buffer[0]);
+    }
+}
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef * hspi){
+    if (hspi->Instance == SPI1){
+        transmitted_data = 1;
+        slave_set_busy();
+        slave_set_free();
+        printf("%d\n", slave_buffer[0]);
+    }
+}
+
 
 int main(void){
-    init_STM32_peripherals();
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_DMA_Init();
 
-    // Try to initialize the file and test some 
+    HAL_Delay(1);
+    MX_SPI1_Init();
+    MX_SPI3_Init();
+    HAL_Delay(1);
+    MX_USART1_UART_Init();
+    RetargetInit(&huart1);
+    MX_FATFS_Init();
 
-
-    // HAL_SPI_Receive_IT(&hspi1, slave_buffer, sizeof(slave_buffer));
-
-    // sd_card_initialized = sd_card_initialize();
-    // if(sd_card_initialized){
-    //     printf("Looking for viable log file.\n");
-    //     do{
-    //         uint16_t log_file_name_length = sprintf(log_file_name, "%d%s", log_file_index, log_file_base_name);
-
-    //         // Quit of the string is too big
-    //         if(log_file_name_length > LOG_FILE_NAME_MAX){
-    //             printf("Log file string too long\n");
-    //             return 0;
-    //         }
-    //         printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
-    //         log_file_location_found = !sd_file_exists(log_file_name);
-    //         log_file_index++;
-    //     }
-    //     while(!log_file_location_found);
-    //     printf("Found viable log file.\n");
-    //     sd_open_file(log_file_name, FA_WRITE | FA_READ | FA_OPEN_ALWAYS);
-    //     sd_close_file();
-
-    //     sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
-    //     sd_set_file_cursor_offset(sd_card_get_selected_file_size());
-    // }
-
-
-
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+    
     printf("Looping\n");
     init_loop_timer();
     while (1){
 
-        HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 1, 1000);
-        // HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_TransmitReceive(&hspi1, dummy_buffer, slave_buffer, 1, 1000);
-
+        // HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 1, 1000);
+        
+        wait_for_not_busy();
+        HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
+        wait_for_not_busy();
         
         if(spi_slave_result_receive == HAL_OK){// || spi_slave_result_receive == HAL_TIMEOUT){
-            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+            slave_set_busy();
             switch (slave_buffer[0])
             {
-                case LOGGER_SD_BUFFER_SIZE:
+                case LOGGER_TEST_INTERFACE:
                 {
-                    uint16_t result = sd_buffer_size();
-                    uint8_t result_array[] = {
-                        (result >> 8) & 0xFF, 
-                        result & 0xFF
-                    };
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, result_array, 2, 100);
-                    break;
-                }
-                case LOGGER_SD_BUFFER_CLEAR:
-                {
-                    sd_buffer_clear();
-                    uint8_t result = 1; // Just to confirm that it is completed
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    uint8_t result = 0b01101010;
+                    slave_set_free();
+                    HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+                    wait_for_not_busy();
                     break;
                 }
                 case LOGGER_SD_CARD_INITIALIZE:
                 {
                     uint8_t result = sd_card_initialize();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+                    slave_set_free();
+                    HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+                    wait_for_not_busy();
                     break;
                 }
                 case LOGGER_SD_OPEN_FILE:
@@ -245,204 +305,44 @@ int main(void){
                     volatile HAL_StatusTypeDef status_receive;
 
                     // We ask how much data should we receive. 
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if((status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000)) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    slave_set_free();
+                    HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
+                    wait_for_not_busy();
+                    slave_set_busy();
+
 
                     volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the instruction and file name
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if( (status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000)) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+                    slave_set_free();
+                    HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
+                    wait_for_not_busy();
+                    slave_set_busy();
 
 
                     // instruction is byte 0
                     char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 1);
 
                     volatile uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, slave_buffer, amount_of_data_to_receive, 100);
+                    slave_set_free();
+                    HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+                    wait_for_not_busy();
+                    slave_set_busy();
+
+                    slave_set_free();
+                    HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+                    wait_for_not_busy();
                     free(extracted_string);
-                    break;
-                }
-                case LOGGER_SD_WRITE_DATA_TO_FILE:
-                {   
-                    // We ask how much data should we receive. 
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-
-                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
-
-                    // Receive the data
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-
-                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
-
-                    uint8_t result = sd_write_data_to_file(extracted_string);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    free(extracted_string);
-                    break;
-                }
-                case LOGGER_SD_READ_DATA_FORM_FILE:
-                {
-                    uint8_t result = sd_read_data_from_file();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_SET_FILE_CURSOR_OFFSET:
-                {
-                    // Receive 4 bytes because need 32 bit number
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 4, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-
-                    uint32_t number = (slave_buffer[0] << 24) | 
-                        (slave_buffer[1] << 16) | 
-                        (slave_buffer[2] << 8) | 
-                        slave_buffer[3];
-
-                    uint8_t result = sd_set_file_cursor_offset(number);
-
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
                     break;
                 }
                 case LOGGER_SD_CLOSE_FILE:
                 {
                     uint8_t result = sd_close_file();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_CARD_DEINITIALIZE:
-                {
-                    uint8_t result = sd_card_deinitialize();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_CARD_APPEND_TO_BUFFER:
-                {
-                    // We ask how much data should we receive. 
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
-
-                    // Receive the data
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
-
-                    sd_card_append_to_buffer(extracted_string);
-                    free(extracted_string);
-                    uint8_t result = 1; // Just to confirm that it is completed
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_GET_BUFFER_POINTER:
-                {   
-                    // Get the data
-                    char* sd_buffer = sd_card_get_buffer_pointer();
-                    char* extracted_string = extract_string_from_spi_data_at_index((uint8_t*)sd_buffer, SD_BUFFER_SIZE, 0);
-
-                    
-                    uint16_t amount_of_data_to_transmit = sd_buffer_size()+1;
-                    uint8_t amount_of_data_to_transmit_bytes[] = {(amount_of_data_to_transmit >> 8) & 0xFF, amount_of_data_to_transmit & 0xFF}; 
-
-                    // Tell how much data will be sent
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Transmit(&hspi1, amount_of_data_to_transmit_bytes, 2, 100) != HAL_OK) {
-                        free(extracted_string);
-                        break;
-                    }
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-
-                    // Send the data
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, (uint8_t*)extracted_string, amount_of_data_to_transmit, 100);
-                    free(extracted_string);
-                    break;
-                }
-                case LOGGER_SD_GET_SELECTED_FILE_SIZE:
-                {
-                    uint32_t result = sd_card_get_selected_file_size();
-                    uint8_t result_array[] = {
-                        (result >> 24) & 0xFF, 
-                        (result >> 16) & 0xFF, 
-                        (result >> 8) & 0xFF, 
-                        result & 0xFF
-                    };
-
-                    // It knows to receive 4 bytes
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, result_array, 4, 100);
-                    break;
-                }
-                case LOGGER_SD_WRITE_BUFFER_TO_FILE:
-                {
-                    uint8_t result = sd_write_buffer_to_file();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_FILE_EXISTS:
-                {
-                    // We ask how much data should we receive. 
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-                    uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
-
-                    // Receive the file name
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
-                    char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
-
-                    uint8_t result = sd_file_exists(extracted_string);
-                    free(extracted_string);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-                    HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    break;
-                }
-                case LOGGER_SD_SAVE_FILE:
-                {
-                    uint8_t result = sd_save_file();
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    slave_set_free();
                     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
                     break;
                 }
 
-
-
-                case LOGGER_INITIALIZE:
-                {
-                    break;
-                }
-                case LOGGER_RESET:
-                {
-                    break;
-                }
-                case LOGGER_WRITE_CHUNK_OF_DATA:
-                {
-                    break;
-                }
-                case LOGGER_CHECK_READY:
-                {
-                    break;
-                }
                 default:
                     // if(slave_buffer[0] == 1){
                     //     uint8_t result = 1;
@@ -453,14 +353,311 @@ int main(void){
                     //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
                     //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
                     // }
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+                    slave_set_free();
                     break;
             }
         }else{
-            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+            slave_set_free();
         }
         
         
+
+
+
+        // if(spi_slave_result_receive == HAL_OK){// || spi_slave_result_receive == HAL_TIMEOUT){
+        //     slave_set_busy();
+        //     switch (slave_buffer[0])
+        //     {
+        //         case LOGGER_SD_BUFFER_SIZE:
+        //         {
+        //             uint16_t result = sd_buffer_size();
+        //             uint8_t result_array[] = {
+        //                 (result >> 8) & 0xFF, 
+        //                 result & 0xFF
+        //             };
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, result_array, 2, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_BUFFER_CLEAR:
+        //         {
+        //             sd_buffer_clear();
+        //             uint8_t result = 1; // Just to confirm that it is completed
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_CARD_INITIALIZE:
+        //         {
+        //             uint8_t result = sd_card_initialize();
+        //             slave_set_free();
+        //             // HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+
+        //             HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+        //             wait_for_transmit();
+
+        //             // HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //             // wait_for_transmit();
+
+        //             break;
+        //         }
+        //         case LOGGER_SD_OPEN_FILE:
+        //         {
+        //             volatile HAL_StatusTypeDef status_receive;
+
+        //             // We ask how much data should we receive. 
+        //             slave_set_free();
+        //             // if((status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000)) != HAL_OK) break;
+
+        //             HAL_SPI_Receive_IT(&hspi1, slave_buffer, 2);
+        //             wait_for_receive();
+
+        //             // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
+        //             // wait_for_receive();
+
+        //             slave_set_busy();
+
+
+
+
+
+        //             volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+        //             // Receive the instruction and file name
+        //             slave_set_free();
+        //             if( (status_receive = HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000)) != HAL_OK) break;
+
+        //             HAL_SPI_Receive_IT(&hspi1, slave_buffer, amount_of_data_to_receive);
+        //             wait_for_receive();
+
+        //             // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
+        //             // wait_for_receive();
+
+        //             slave_set_busy();
+
+
+
+
+        //             // instruction is byte 0
+        //             char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 1);
+
+        //             volatile uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
+        //             slave_set_free();
+        //             // HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+
+                    
+        //             HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+        //             wait_for_transmit();
+
+        //             // HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //             // wait_for_transmit();
+
+
+
+
+        //             slave_set_busy();
+        //             slave_set_free();
+        //             // HAL_SPI_Transmit(&hspi1, slave_buffer, amount_of_data_to_receive, 100);
+                    
+        //             HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+        //             wait_for_transmit();
+
+        //             // HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
+        //             // wait_for_transmit();
+
+        //             free(extracted_string);
+        //             break;
+        //         }
+        //         case LOGGER_SD_WRITE_DATA_TO_FILE:
+        //         {   
+        //             // We ask how much data should we receive. 
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+
+        //             uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+        //             // Receive the data
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+
+        //             char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+        //             uint8_t result = sd_write_data_to_file(extracted_string);
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             free(extracted_string);
+        //             break;
+        //         }
+        //         case LOGGER_SD_READ_DATA_FORM_FILE:
+        //         {
+        //             uint8_t result = sd_read_data_from_file();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_SET_FILE_CURSOR_OFFSET:
+        //         {
+        //             // Receive 4 bytes because need 32 bit number
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, 4, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+
+        //             uint32_t number = (slave_buffer[0] << 24) | 
+        //                 (slave_buffer[1] << 16) | 
+        //                 (slave_buffer[2] << 8) | 
+        //                 slave_buffer[3];
+
+        //             uint8_t result = sd_set_file_cursor_offset(number);
+
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_CLOSE_FILE:
+        //         {
+        //             uint8_t result = sd_close_file();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_CARD_DEINITIALIZE:
+        //         {
+        //             uint8_t result = sd_card_deinitialize();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_CARD_APPEND_TO_BUFFER:
+        //         {
+        //             // We ask how much data should we receive. 
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+        //             uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+        //             // Receive the data
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+        //             char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+        //             sd_card_append_to_buffer(extracted_string);
+        //             free(extracted_string);
+        //             uint8_t result = 1; // Just to confirm that it is completed
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_GET_BUFFER_POINTER:
+        //         {   
+        //             // Get the data
+        //             char* sd_buffer = sd_card_get_buffer_pointer();
+        //             char* extracted_string = extract_string_from_spi_data_at_index((uint8_t*)sd_buffer, SD_BUFFER_SIZE, 0);
+
+                    
+        //             uint16_t amount_of_data_to_transmit = sd_buffer_size()+1;
+        //             uint8_t amount_of_data_to_transmit_bytes[] = {(amount_of_data_to_transmit >> 8) & 0xFF, amount_of_data_to_transmit & 0xFF}; 
+
+        //             // Tell how much data will be sent
+        //             slave_set_free();
+        //             if(HAL_SPI_Transmit(&hspi1, amount_of_data_to_transmit_bytes, 2, 100) != HAL_OK) {
+        //                 free(extracted_string);
+        //                 break;
+        //             }
+        //             slave_set_busy();
+
+        //             // Send the data
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, (uint8_t*)extracted_string, amount_of_data_to_transmit, 100);
+        //             free(extracted_string);
+        //             break;
+        //         }
+        //         case LOGGER_SD_GET_SELECTED_FILE_SIZE:
+        //         {
+        //             uint32_t result = sd_card_get_selected_file_size();
+        //             uint8_t result_array[] = {
+        //                 (result >> 24) & 0xFF, 
+        //                 (result >> 16) & 0xFF, 
+        //                 (result >> 8) & 0xFF, 
+        //                 result & 0xFF
+        //             };
+
+        //             // It knows to receive 4 bytes
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, result_array, 4, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_WRITE_BUFFER_TO_FILE:
+        //         {
+        //             uint8_t result = sd_write_buffer_to_file();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_FILE_EXISTS:
+        //         {
+        //             // We ask how much data should we receive. 
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, 2, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+        //             uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+        //             // Receive the file name
+        //             slave_set_free();
+        //             if(HAL_SPI_Receive(&hspi1, slave_buffer, amount_of_data_to_receive, 1000) != HAL_OK) break;
+        //             slave_set_busy();
+        //             char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+        //             uint8_t result = sd_file_exists(extracted_string);
+        //             free(extracted_string);
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+        //         case LOGGER_SD_SAVE_FILE:
+        //         {
+        //             uint8_t result = sd_save_file();
+        //             slave_set_free();
+        //             HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             break;
+        //         }
+
+
+
+        //         case LOGGER_INITIALIZE:
+        //         {
+        //             break;
+        //         }
+        //         case LOGGER_RESET:
+        //         {
+        //             break;
+        //         }
+        //         case LOGGER_WRITE_CHUNK_OF_DATA:
+        //         {
+        //             break;
+        //         }
+        //         case LOGGER_CHECK_READY:
+        //         {
+        //             break;
+        //         }
+        //         default:
+        //             // if(slave_buffer[0] == 1){
+        //             //     uint8_t result = 1;
+        //             //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        //             //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             // }else if(slave_buffer[0] == 0){
+        //             //     uint8_t result = 1;
+        //             //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+        //             //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
+        //             // }
+        //             slave_set_free();
+        //             break;
+        //     }
+        // }else{
+        //     slave_set_free();
+        // }
         // if(sd_card_initialized){
         //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
         //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
@@ -492,29 +689,12 @@ int main(void){
         // }
 
         // handle_loop_timing();
-        // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+        // slave_set_free();
     }
 }
 
 void init_STM32_peripherals(){
-    HAL_Init();
-    SystemClock_Config();
-    MX_GPIO_Init();
 
-    HAL_Delay(1);
-    MX_SPI1_Init();
-    MX_SPI3_Init();
-    HAL_Delay(1);
-    MX_USART1_UART_Init();
-    RetargetInit(&huart1);
-    MX_FATFS_Init();
-
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
-    
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 }
 
 void init_loop_timer(){
@@ -752,7 +932,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+  slave_set_free();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);

@@ -29,7 +29,13 @@ enum t_logger_commands {
     LOGGER_RESET    = 0x13 + 16,
     LOGGER_WRITE_CHUNK_OF_DATA = 0x14 + 16,
     LOGGER_CHECK_READY = 0x15 + 16,
+
+    LOGGER_TEST_INTERFACE = 0x16 + 16,
+
 };
+
+#define MIN_SD_COMMAND (0x02 + 16)
+#define MAX_SD_COMMAND (0x16 + 16)
 
 uint16_t sd_buffer_size(void);
 void sd_buffer_clear(void);
