@@ -64,7 +64,6 @@ uint8_t log_loop_count = 0;
 // SPI slave stuff functionality
 #define SLAVE_BUFFER_SIZE 100
 uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
-uint8_t dummy_buffer[SLAVE_BUFFER_SIZE];
 
 /**
  * Extracts and returns a dynamically allocated string from SPI received data starting from a specific index.
@@ -141,6 +140,14 @@ uint8_t wait_for_not_busy(){
     return 1;
 }
 
+uint8_t kill_dma_action(){
+    HAL_SPI_DMAStop(&hspi1);
+    HAL_DMA_DeInit(&hdma_spi1_rx);
+    HAL_DMA_DeInit(&hdma_spi1_tx);
+    MX_DMA_Init();
+    MX_SPI1_Init();
+}
+
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi)
 {
@@ -148,104 +155,22 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef * hspi)
         received_data = 1;
         slave_set_busy();
         slave_set_free();
-        // if(current_instruction == 0x00 && slave_buffer[0] >= MIN_SD_COMMAND && slave_buffer[0] <= MAX_SD_COMMAND){
-        //     current_instruction = slave_buffer[0];
-        // }
-
-        // if(current_instruction != 0x00){
-        //     slave_set_busy();
-        //     switch (slave_buffer[0])
-        //     {
-        //         case LOGGER_SD_CARD_INITIALIZE:
-        //         {
-        //             uint8_t result = sd_card_initialize();
-        //             slave_set_free();
-        //             HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
-        //             current_instruction = 0;
-        //             current_instruction_phase = 0;
-        //             break;
-        //         }
-        //         case LOGGER_SD_OPEN_FILE:
-        //         {
-        //             volatile HAL_StatusTypeDef status_receive;
-        //             if(current_instruction_phase == 0){
-        //                 // We ask how much data should we receive. 
-        //                 slave_set_free();
-        //                 HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 2);
-        //                 current_instruction_phase = 1;
-        //             }else if(current_instruction_phase == 1){
-        //                 slave_set_busy();
-        //                 amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
-
-        //                 // Receive the instruction and file name
-        //                 slave_set_free();
-        //                 HAL_SPI_Receive_DMA(&hspi1, slave_buffer, amount_of_data_to_receive);
-        //                 current_instruction_phase = 2;
-        //             }else if(current_instruction_phase == 2){
-        //                 slave_set_busy();
-                        
-        //                 // instruction is byte 0
-        //                 char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 1);
-        //                 volatile uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
-        //                 slave_set_free();
-        //                 HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
-        //                 // slave_set_busy();
-        //                 // slave_set_free();
-        //                 HAL_SPI_Transmit_DMA(&hspi1, slave_buffer, amount_of_data_to_receive);
-        //                 free(extracted_string);
-        //                 current_instruction = 0;
-        //                 current_instruction_phase = 0;
-        //                 amount_of_data_to_receive = 0;
-        //             }
-        //             break;
-        //         }
-        //         case LOGGER_SD_CLOSE_FILE:
-        //         {
-        //             uint8_t result = sd_close_file();
-        //             slave_set_free();
-        //             HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
-        //             current_instruction = 0;
-        //             current_instruction_phase = 0;
-        //             break;
-        //         }
-        //         default:
-        //         {
-        //             current_instruction = 0;
-        //             current_instruction_phase = 0;
-        //             amount_of_data_to_receive = 0;
-        //             break;
-        //         }
-        //     }
-        // }else{
-        //     slave_set_free();
-        //     HAL_SPI_Receive_IT(&hspi1, slave_buffer, 1);
-
-        //     // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
-        // }
-
-
-
-        // printf("%d\n", slave_buffer[0]);
-        // HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
-        // HAL_SPI_Transmit_DMA(&hspi1, slave_buffer, 1);
     }
 }
 
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi){
     if (hspi->Instance == SPI1){
         transmit_receive_error = 1;
-        slave_set_busy();
-        slave_set_free();
-        printf("%d\n", slave_buffer[0]);
+        // slave_set_busy();
+        // slave_set_free();
     }
 }
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef * hspi){
     if (hspi->Instance == SPI1){
         transmitted_data = 1;
-        slave_set_busy();
-        slave_set_free();
-        printf("%d\n", slave_buffer[0]);
+        // slave_set_busy();
+        // slave_set_free();
     }
 }
 
@@ -271,15 +196,19 @@ int main(void){
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
     
     printf("Looping\n");
-    init_loop_timer();
     while (1){
 
-        // HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive(&hspi1, slave_buffer, 1, 1000);
-        
-        wait_for_not_busy();
         HAL_StatusTypeDef spi_slave_result_receive = HAL_SPI_Receive_DMA(&hspi1, slave_buffer, 1);
-        wait_for_not_busy();
-        
+        wait_for_receive();
+        if(spi_slave_result_receive == HAL_BUSY){
+            slave_set_busy();
+            slave_set_free();
+        }
+
+        continue;
+
+
+        slave_set_busy();
         if(spi_slave_result_receive == HAL_OK){// || spi_slave_result_receive == HAL_TIMEOUT){
             slave_set_busy();
             switch (slave_buffer[0])
@@ -288,7 +217,7 @@ int main(void){
                 {
                     uint8_t result = 0b01101010;
                     slave_set_free();
-                    HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+                    HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
                     wait_for_not_busy();
                     break;
                 }
@@ -296,7 +225,7 @@ int main(void){
                 {
                     uint8_t result = sd_card_initialize();
                     slave_set_free();
-                    HAL_SPI_Transmit_IT(&hspi1, &result, 1);
+                    HAL_SPI_Transmit_DMA(&hspi1, &result, 1);
                     wait_for_not_busy();
                     break;
                 }
@@ -344,15 +273,6 @@ int main(void){
                 }
 
                 default:
-                    // if(slave_buffer[0] == 1){
-                    //     uint8_t result = 1;
-                    //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-                    //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    // }else if(slave_buffer[0] == 0){
-                    //     uint8_t result = 1;
-                    //     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-                    //     HAL_SPI_Transmit(&hspi1, &result, 1, 100);
-                    // }
                     slave_set_free();
                     break;
             }
