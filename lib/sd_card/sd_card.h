@@ -31,7 +31,6 @@ enum t_logger_commands {
     LOGGER_CHECK_READY = 0x15 + 16,
 
     LOGGER_TEST_INTERFACE = 0x16 + 16,
-
 };
 
 #define MIN_SD_COMMAND (0x02 + 16)
