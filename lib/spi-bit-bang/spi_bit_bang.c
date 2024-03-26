@@ -157,6 +157,8 @@ uint8_t wait_for_transmit_queue_empty(uint16_t timeout_ms){
     uint32_t start_time = HAL_GetTick();
     uint32_t delta_time = 0;
 
+
+    // consider checking if the slave select goes to disabled
     while(transmit_bytes_queue != 0 && (delta_time = (HAL_GetTick() - start_time)) < timeout_ms );
 
     if(delta_time >= timeout_ms){

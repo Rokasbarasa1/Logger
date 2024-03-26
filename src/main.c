@@ -182,10 +182,10 @@ int main(void){
                     uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
                     slave_set_free();
                     if(!spi_bit_bang_transmit(&result, 1, 1000)) break;
-                    slave_set_busy();
+                    // slave_set_busy();
 
-                    slave_set_free();
-                    spi_bit_bang_transmit(slave_buffer, amount_of_data_to_receive, 1000);
+                    // slave_set_free();
+                    // spi_bit_bang_transmit(slave_buffer, amount_of_data_to_receive, 1000);
                     free(extracted_string);
                     break;
                 }
@@ -283,10 +283,16 @@ int main(void){
 
                     // Tell how much data will be sent
                     slave_set_free();
-                    if(!spi_bit_bang_receive(amount_of_data_to_transmit_bytes, 2, 1000)){
+                    if(!spi_bit_bang_transmit(amount_of_data_to_transmit_bytes, 2, 1000)){
                         free(extracted_string);
                         break;
                     }
+
+                    if(amount_of_data_to_transmit == 0){
+                        free(extracted_string);
+                        break;
+                    }
+
                     slave_set_busy();
 
                     // Send the data
@@ -397,22 +403,27 @@ int main(void){
         // }
 
 
-        // if(sd_card_initialized && log_loop_count > 0){
-        //     // sd_card_initialize();
+    //     if(sd_card_initialized && log_loop_count > 0){
+    //         // sd_card_initialize();
 
-        //     sd_close_file();
-        //     sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
-        //     sd_set_file_cursor_offset(sd_card_get_selected_file_size());
-        //     sd_card_initialized = sd_write_buffer_to_file();
-        //     sd_save_file();
-        //     // sd_close_file();
-        //     sd_buffer_clear();
-        //     log_loop_count = 0;
+    //         sd_close_file();
+    //         sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
+    //         sd_set_file_cursor_offset(sd_card_get_selected_file_size());
+    //         sd_card_initialized = sd_write_buffer_to_file();
+    //         sd_save_file();
+    //         // sd_close_file();
+    //         sd_buffer_clear();
+    //         log_loop_count = 0;
 
-        //     // sd_card_deinitialize();
+    //         // sd_card_deinitialize();
             
-        //     // printf(" Logged data from buffer to SD. ");
-        // }
+    //         // printf(" Logged data from buffer to SD. ");
+    //     }
+
+
+
+
+
     }
 }
 
