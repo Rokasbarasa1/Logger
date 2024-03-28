@@ -82,10 +82,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                     // receive_buffer_index++;
                     receive_bytes_queue--;
                     receive_bit_index_counter = 0;
-                    // if(receive_buffer_index > 100){
-                    //     HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
-                    //     HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_SET);
-                    // }
                 }
                 
             }else if(clock_state == 0 && transmit_bytes_queue != 0){
@@ -185,11 +181,7 @@ uint8_t wait_for_receive_queue_empty(uint16_t timeout_ms){
     while(receive_bytes_queue != 0 && (delta_time = (HAL_GetTick() - start_time)) < timeout_ms);
 
     if(delta_time >= timeout_ms){
-        // if(receive_buffer_index >400){
-        //     printf("asda");
-        // }
         clear_spi_queues();
-
         return 0;
     }
 
