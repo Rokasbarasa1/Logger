@@ -452,42 +452,6 @@ int main(void){
         }else{
             slave_set_free();
         }
-
-
-        // if(sd_card_initialized){
-        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-        //     sd_card_append_to_buffer("ACCELdasda asdasdas, ");
-        //     sd_card_append_to_buffer("\n");
-            
-        //     // printf(" Logged data to SD buffer. ");
-        //     log_loop_count++;
-        // }
-
-
-    //     if(sd_card_initialized && log_loop_count > 0){
-    //         // sd_card_initialize();
-
-    //         sd_close_file();
-    //         sd_card_initialized = sd_open_file(log_file_name, FA_WRITE);
-    //         sd_set_file_cursor_offset(sd_card_get_selected_file_size());
-    //         sd_card_initialized = sd_write_buffer_to_file();
-    //         sd_save_file();
-    //         // sd_close_file();
-    //         sd_buffer_clear();
-    //         log_loop_count = 0;
-
-    //         // sd_card_deinitialize();
-            
-    //         // printf(" Logged data from buffer to SD. ");
-    //     }
-
-
-
-
-
     }
 }
 

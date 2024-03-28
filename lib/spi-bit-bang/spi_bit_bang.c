@@ -26,23 +26,22 @@ uint16_t m_MISO_pin;
 
 #define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 10000
 uint8_t receive_buffer[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
-volatile uint8_t receive_buffer_index = 0;
+volatile uint16_t receive_buffer_index = 0;
 volatile uint8_t receive_bit_index_counter = 0;
-volatile uint8_t receive_bit_skip = 0;
-volatile uint8_t receive_bytes_queue = 0;
+volatile uint16_t receive_bit_skip = 0;
+volatile uint16_t receive_bytes_queue = 0;
 
 #define SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE 1000
 uint8_t transmit_buffer[SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE];
-volatile uint8_t transmit_buffer_index = 0;
+volatile uint16_t transmit_buffer_index = 0;
 volatile uint8_t transmit_bit_index_counter = 0;
-volatile uint8_t transmit_bit_skip = 0;
-volatile uint8_t transmit_bytes_queue = 0;
+volatile uint16_t transmit_bit_skip = 0;
+volatile uint16_t transmit_bytes_queue = 0;
 
 volatile uint8_t slave_selected = 0;
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-
     if(!driver_initialized){
         return;
     }
@@ -83,6 +82,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                     // receive_buffer_index++;
                     receive_bytes_queue--;
                     receive_bit_index_counter = 0;
+                    // if(receive_buffer_index > 100){
+                    //     HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
+                    //     HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_SET);
+                    // }
                 }
                 
             }else if(clock_state == 0 && transmit_bytes_queue != 0){
@@ -90,10 +93,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 uint8_t MISO_state = (transmit_buffer[transmit_buffer_index] >> (7 - transmit_bit_index_counter)) & 0x01;
                 HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, MISO_state);
 
-                // 0123 4567
                 transmit_bit_index_counter++;
                 if(transmit_bit_index_counter == 8){
-                    if(SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE-1 > receive_buffer_index+1){
+                    if(SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE-1 > transmit_buffer_index+1){
                         transmit_buffer_index++;
                     }
                     // transmit_buffer_index++;
@@ -183,7 +185,11 @@ uint8_t wait_for_receive_queue_empty(uint16_t timeout_ms){
     while(receive_bytes_queue != 0 && (delta_time = (HAL_GetTick() - start_time)) < timeout_ms);
 
     if(delta_time >= timeout_ms){
+        // if(receive_buffer_index >400){
+        //     printf("asda");
+        // }
         clear_spi_queues();
+
         return 0;
     }
 
@@ -206,8 +212,6 @@ uint8_t wait_for_skips(uint16_t timeout_ms){
 
 uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size, uint16_t timeout_ms){
     if(receive_data_size >= SPI_BIT_BANG_RECEIVE_BUFFER_SIZE){
-        volatile uint8_t test = 34%3;
-        printf("a");
         return 0;
     }
 
@@ -218,7 +222,7 @@ uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size,
 
 
     // Could cause problems with interrupt happening durring this proccess
-    for(uint8_t i = 0; i < receive_data_size; i++){
+    for(uint16_t i = 0; i < receive_data_size; i++){
         receive_data[i] = receive_buffer[i];
     }
 
@@ -229,14 +233,12 @@ uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size,
 
 uint8_t spi_bit_bang_transmit(uint8_t * transmit_data, uint16_t transmit_data_size, uint16_t timeout_ms){
     if(transmit_data_size >= SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE){
-        volatile uint8_t test = 34%3;
-        printf("a");
         return 0;
     }
 
     if(!wait_for_receive_queue_empty(timeout_ms)) return 0;
     if(!wait_for_transmit_queue_empty(timeout_ms)) return 0;
-    for(uint8_t i = 0; i < transmit_data_size; i++){
+    for(uint16_t i = 0; i < transmit_data_size; i++){
         transmit_buffer[i] = transmit_data[i];
     }
 
