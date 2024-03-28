@@ -58,7 +58,7 @@ uint8_t log_loop_count = 0;
 
 
 // SPI slave stuff functionality
-#define SLAVE_BUFFER_SIZE 100
+#define SLAVE_BUFFER_SIZE 10000
 uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
 
 /**
@@ -355,17 +355,81 @@ int main(void){
                 
                 case LOGGER_INITIALIZE:
                 {
+                    // We ask how much data should we receive. 
                     slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    slave_set_busy();
+
+                    volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the base file name
+                    slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    slave_set_busy();
+
+                    uint8_t result_sd_initialize = sd_card_initialize();
+                    if(result_sd_initialize){
+                        // printf("Looking for viable log file.\n");
+                        do{
+                            uint16_t log_file_name_length = sprintf(log_file_name, "%d%s", log_file_index, slave_buffer);
+
+                            // Quit of the string is too big
+                            if(log_file_name_length > LOG_FILE_NAME_MAX){
+                                // printf("Log file string too long\n");
+                                return 0;
+                            }
+                            // printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
+                            log_file_location_found = !sd_file_exists(log_file_name);
+                            log_file_index++;
+                        }
+                        while(!log_file_location_found);
+                        // printf("Found viable log file.\n");
+                        result_sd_initialize = sd_open_file(log_file_name, FA_WRITE | FA_READ | FA_OPEN_ALWAYS);
+                        result_sd_initialize = sd_close_file();
+                        result_sd_initialize = sd_open_file(log_file_name, FA_WRITE);
+                        sd_set_file_cursor_offset(sd_card_get_selected_file_size());
+                    }
+                    
+                    slave_set_free();
+                    if(!spi_bit_bang_transmit(&result_sd_initialize, 1, 1000)) break;
                     break;
                 }
                 case LOGGER_RESET:
-                {
+                {   
+                    // Reset file name stuff
+                    log_file_index = 1;
+                    log_file_base_name[0] = 0; // terminate the string
+                    log_file_name[0] = 0; // terminate the string
+                    log_file_location_found = 0;
+                    sd_card_initialized = 0;
+                    log_loop_count = 0;
+
+                    sd_close_file(); // Dont care about the result of this. Just try to close it.
+                    uint8_t result = sd_card_deinitialize();
                     slave_set_free();
+                    spi_bit_bang_transmit(&result, 1, 1000);
+
                     break;
                 }
                 case LOGGER_WRITE_CHUNK_OF_DATA:
                 {
                     slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    slave_set_busy();
+
+                    volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the base file name
+                    slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    slave_set_busy();
+
+                    // The result of this one is weird, ignore it
+                    sd_write_data_to_file((char*)slave_buffer);
+                    uint8_t result_save  = sd_save_file();
+
+                    slave_set_free();
+                    spi_bit_bang_transmit(&result_save, 1, 1000);
                     break;
                 }
                 case LOGGER_CHECK_READY:

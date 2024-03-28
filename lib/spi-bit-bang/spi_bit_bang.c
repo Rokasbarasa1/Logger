@@ -24,14 +24,14 @@ uint16_t m_MOSI_pin;
 GPIO_TypeDef* m_MISO_port;
 uint16_t m_MISO_pin;
 
-#define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 100
+#define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 10000
 uint8_t receive_buffer[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
 volatile uint8_t receive_buffer_index = 0;
 volatile uint8_t receive_bit_index_counter = 0;
 volatile uint8_t receive_bit_skip = 0;
 volatile uint8_t receive_bytes_queue = 0;
 
-#define SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE 100
+#define SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE 1000
 uint8_t transmit_buffer[SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE];
 volatile uint8_t transmit_buffer_index = 0;
 volatile uint8_t transmit_bit_index_counter = 0;
@@ -76,7 +76,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 
                 receive_bit_index_counter++;
                 if(receive_bit_index_counter == 8){
-                    receive_buffer_index++;
+                    // Do not ever overwrite the last byte of the buffer and dont move in the buffer if end is reached
+                    if(SPI_BIT_BANG_RECEIVE_BUFFER_SIZE-1 > receive_buffer_index+1){
+                        receive_buffer_index++;
+                    }
+                    // receive_buffer_index++;
                     receive_bytes_queue--;
                     receive_bit_index_counter = 0;
                 }
@@ -89,7 +93,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 // 0123 4567
                 transmit_bit_index_counter++;
                 if(transmit_bit_index_counter == 8){
-                    transmit_buffer_index++;
+                    if(SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE-1 > receive_buffer_index+1){
+                        transmit_buffer_index++;
+                    }
+                    // transmit_buffer_index++;
                     transmit_bytes_queue--;
                     transmit_bit_index_counter = 0;
                 }
@@ -197,7 +204,13 @@ uint8_t wait_for_skips(uint16_t timeout_ms){
     return 1;
 }
 
-uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint8_t receive_data_size, uint16_t timeout_ms){
+uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size, uint16_t timeout_ms){
+    if(receive_data_size >= SPI_BIT_BANG_RECEIVE_BUFFER_SIZE){
+        volatile uint8_t test = 34%3;
+        printf("a");
+        return 0;
+    }
+
     if(!wait_for_receive_queue_empty(timeout_ms)) return 0;
     if(!wait_for_transmit_queue_empty(timeout_ms)) return 0;
     receive_bytes_queue += receive_data_size;
@@ -214,10 +227,15 @@ uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint8_t receive_data_size, 
     return 1;
 }
 
-uint8_t spi_bit_bang_transmit(uint8_t * transmit_data, uint8_t transmit_data_size, uint16_t timeout_ms){
+uint8_t spi_bit_bang_transmit(uint8_t * transmit_data, uint16_t transmit_data_size, uint16_t timeout_ms){
+    if(transmit_data_size >= SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE){
+        volatile uint8_t test = 34%3;
+        printf("a");
+        return 0;
+    }
+
     if(!wait_for_receive_queue_empty(timeout_ms)) return 0;
     if(!wait_for_transmit_queue_empty(timeout_ms)) return 0;
-
     for(uint8_t i = 0; i < transmit_data_size; i++){
         transmit_buffer[i] = transmit_data[i];
     }

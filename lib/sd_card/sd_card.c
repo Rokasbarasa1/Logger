@@ -23,8 +23,8 @@ uint16_t sd_buffer_size(void){
 }
 
 void sd_buffer_clear(void){
-    for(int i=0; i< 1024; i++){
-        sd_buffer[i] = '\n';
+    for(int i=0; i< SD_BUFFER_SIZE; i++){
+        sd_buffer[i] = 0;
     }
 }
 
@@ -85,6 +85,7 @@ uint8_t sd_open_file(const char *file_name, uint8_t instruction){
 }
 
 uint8_t sd_write_data_to_file(const char *data){
+    // Why does this give random value??? I wrote 156 bytes and got a result form this of 160, what does that mean???
     sd_result = f_puts(data, &sd_file);
     
     if(sd_result != FR_OK) {
