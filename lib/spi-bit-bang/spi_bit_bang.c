@@ -40,6 +40,10 @@ volatile uint16_t transmit_bytes_queue = 0;
 
 volatile uint8_t slave_selected = 0;
 
+// Interrupt routine latency - 1650 ns
+// -100 ns CHATGPT if statement optimizations
+// -400 ns clock 75 Mhz -> 100 Mhz
+// -200 ns seperating SS and CLK interupt functions and calling them directly from "EXTI_IRQHandler"
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(!driver_initialized){
@@ -107,11 +111,126 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
+// void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+// {
+//     if (!driver_initialized) {
+//         return;
+//     }
 
-// interrupt to sense when it is selected
+//     // Handle Slave Select Pin (SS)
+//     if (GPIO_Pin == m_SS_pin) {
+//         slave_selected = !HAL_GPIO_ReadPin(m_SS_port, m_SS_pin);
+//         HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, (slave_selected) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+//         return;
+//     }
 
-// Separate interrupt to sense when clock is doing things
+//     // Ensure we are only processing clock pin interrupts when slave is selected
+//     if (!slave_selected || GPIO_Pin != m_CLK_pin) {
+//         return;
+//     }
 
+//     uint8_t clock_state = HAL_GPIO_ReadPin(m_CLK_port, m_CLK_pin);
+
+//     if (clock_state == 1) { // Rising edge
+//         if (receive_bytes_queue == 0 || receive_bit_skip != 0) {
+//             if (receive_bit_skip != 0) {
+//                 receive_bit_skip--;
+//             }
+//             return;
+//         }
+
+//         // Read on rising edge
+//         uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
+//         if (!receive_bit_index_counter) {
+//             receive_buffer[receive_buffer_index] = 0; // Reset byte on first bit read
+//         }
+//         receive_buffer[receive_buffer_index] |= MOSI_state << (7 - receive_bit_index_counter);
+        
+//         if (++receive_bit_index_counter == 8) {
+//             receive_bit_index_counter = 0;
+//             if (receive_buffer_index < SPI_BIT_BANG_RECEIVE_BUFFER_SIZE - 1) {
+//                 receive_buffer_index++;
+//             }
+//             receive_bytes_queue--;
+//         }
+//     } else { // Falling edge
+//         if (transmit_bytes_queue == 0) {
+//             HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
+//             return;
+//         }
+
+//         // Write on falling edge
+//         uint8_t MISO_state = (transmit_buffer[transmit_buffer_index] >> (7 - transmit_bit_index_counter)) & 0x01;
+//         HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, MISO_state);
+        
+//         if (++transmit_bit_index_counter == 8) {
+//             transmit_bit_index_counter = 0;
+//             if (transmit_buffer_index < SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE - 1) {
+//                 transmit_buffer_index++;
+//             }
+//             transmit_bytes_queue--;
+//         }
+//     }
+// }
+
+void spi_bit_bang_ss_interrupt(){
+    if (!driver_initialized) {
+        return;
+    }
+
+    slave_selected = !HAL_GPIO_ReadPin(m_SS_port, m_SS_pin);
+    HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, (slave_selected) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+void spi_bit_bang_clk_interrupt(){
+       // Ensure we are only processing clock pin interrupts when slave is selected
+    if (!slave_selected) {
+        return;
+    }
+
+    uint8_t clock_state = HAL_GPIO_ReadPin(m_CLK_port, m_CLK_pin);
+
+    if (clock_state == 1) { // Rising edge
+        if (receive_bytes_queue == 0 || receive_bit_skip != 0) {
+            if (receive_bit_skip != 0) {
+                receive_bit_skip--;
+            }
+            return;
+        }
+
+        // Read on rising edge
+        uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
+        if (!receive_bit_index_counter) {
+            receive_buffer[receive_buffer_index] = 0; // Reset byte on first bit read
+        }
+        receive_buffer[receive_buffer_index] |= MOSI_state << (7 - receive_bit_index_counter);
+        
+        if (++receive_bit_index_counter == 8) {
+            receive_bit_index_counter = 0;
+            if (receive_buffer_index < SPI_BIT_BANG_RECEIVE_BUFFER_SIZE - 1) {
+                receive_buffer_index++;
+            }
+            receive_bytes_queue--;
+        }
+    } else { // Falling edge
+        if (transmit_bytes_queue == 0) {
+            HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
+            return;
+        }
+
+        // Write on falling edge
+        uint8_t MISO_state = (transmit_buffer[transmit_buffer_index] >> (7 - transmit_bit_index_counter)) & 0x01;
+        HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, MISO_state);
+        
+        if (++transmit_bit_index_counter == 8) {
+            transmit_bit_index_counter = 0;
+            if (transmit_buffer_index < SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE - 1) {
+                transmit_buffer_index++;
+            }
+            transmit_bytes_queue--;
+        }
+    }
+}
 
 /**
  * @brief 

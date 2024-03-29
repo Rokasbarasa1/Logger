@@ -64,7 +64,8 @@ void SDTimer_Handler(void)
     Timer2--;
 }
 
-
+// Need to call the interrupts in this
+#include "../lib/spi-bit-bang/spi_bit_bang.h"
 
 /* USER CODE END 0 */
 
@@ -226,7 +227,19 @@ void EXTI4_IRQHandler(void)
 
   /* USER CODE END EXTI4_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
+
+
   /* USER CODE BEGIN EXTI4_IRQn 1 */
+
+
+
+    // if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET)
+    // {
+    //     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
+    //     spi_bit_bang_ss_interrupt();
+    // }
+
+
 
   /* USER CODE END EXTI4_IRQn 1 */
 }
@@ -240,7 +253,21 @@ void EXTI9_5_IRQHandler(void)
 
   /* USER CODE END EXTI9_5_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_5);
+  /* EXTI line interrupt detected */
+
   /* USER CODE BEGIN EXTI9_5_IRQn 1 */
+
+
+
+
+    // if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_5) != RESET)
+    // {
+    //     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_5);
+    //     spi_bit_bang_clk_interrupt();
+    // }
+
+
+
 
   /* USER CODE END EXTI9_5_IRQn 1 */
 }
