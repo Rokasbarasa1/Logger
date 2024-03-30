@@ -24,7 +24,8 @@
         "diskio.h": "c",
         "sd_card.h": "c",
         "integer.h": "c",
-        "stm32_hal_legacy.h": "c"
+        "stm32_hal_legacy.h": "c",
+        "spi_bit_bang.h": "c"
     },
     "cSpell.words": [
         "FATFS",
