@@ -12,4 +12,5 @@ uint8_t spi_bit_bang_receive_async();
 uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data);
 uint8_t spi_bit_bang_soft_cancel_receive_async();
 uint8_t spi_bit_bang_hard_cancel_receive_async();
-uint8_t spi_bit_bang_sawp_receive_async_buffer();
+uint8_t spi_bit_bang_swap_receive_async_buffer();
+uint16_t spi_bit_bang_get_non_active_buffer_size();

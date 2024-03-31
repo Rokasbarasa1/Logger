@@ -438,7 +438,6 @@ int main(void){
                     uint8_t result = 0b01101010;
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
-                    printf("a");
                     break;
                 }
                 case LOGGER_ENTER_ASYNC_MODE:
@@ -447,13 +446,26 @@ int main(void){
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
 
-                    //
+                    // Clean both buffers for leftover data
+                    spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_swap_receive_async_buffer();
+                    spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_swap_receive_async_buffer();
+
                     while(1){
                         // Swap the receive buffers so receive can happen while sd write is happening
-                        spi_bit_bang_sawp_receive_async_buffer();
+                        spi_bit_bang_swap_receive_async_buffer();
                         spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer);
                         if(strlen((char*)slave_buffer) != 0){
-                            
+                            uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
+                            //Check for zero terminators before the end one
+                            for(uint16_t i = 0; i<data_size; i++){
+                                if(i == data_size-1){
+                                    break; // This is the last character of the data, it has to be zero
+                                }
+
+                                if(slave_buffer[i] == '\0') slave_buffer[i] = 32; // Ascii code for space ' '
+                            }
 
                             // Check if master wants this async stuff to stop
                             if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){

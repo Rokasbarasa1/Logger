@@ -24,8 +24,8 @@ uint16_t m_MOSI_pin;
 GPIO_TypeDef* m_MISO_port;
 uint16_t m_MISO_pin;
 
-#define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 10000
-uint8_t receive_buffer_selected = 0; // 0-1, 1-2
+#define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 20000
+volatile uint8_t receive_buffer_selected = 0; // 0-1, 1-2
 uint8_t receive_buffer0[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
 uint8_t receive_buffer1[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
 
@@ -72,7 +72,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             // Read on rising edge
             uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
 
-            if(!receive_buffer_selected){
+            if(receive_buffer_selected == 0){
                 // Reset when reading the 0 bit as the first action.
                 if(!receive_bit_index_counter){
                     receive_buffer0[receive_buffer0_index] = 0;
@@ -166,7 +166,7 @@ uint8_t spi_bit_bang_initialize(GPIO_TypeDef* SS_port, uint16_t SS_pin, GPIO_Typ
 }
 
 void clear_spi_queues(){
-    if(!receive_buffer_selected){
+    if(receive_buffer_selected == 0){
         receive_buffer0_index = 0;
     }else{
         receive_buffer1_index = 0;
@@ -237,14 +237,14 @@ uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size,
 
     // Could cause problems with interrupt happening durring this proccess
     for(uint16_t i = 0; i < receive_data_size; i++){
-        if(!receive_buffer_selected){
+        if(receive_buffer_selected == 0){
             receive_data[i] = receive_buffer0[i];
         }else{
             receive_data[i] = receive_buffer1[i];
         }
     }
 
-    if(!receive_buffer_selected){
+    if(receive_buffer_selected == 0){
         receive_buffer0_index -= receive_data_size;
     }else{
         receive_buffer1_index -= receive_data_size;
@@ -283,19 +283,13 @@ uint8_t spi_bit_bang_receive_async(){
 uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data){
     while (slave_selected); // Wait for slave not to be selected
 
-    for(uint16_t i = 0; i < SPI_BIT_BANG_RECEIVE_BUFFER_SIZE; i++){
-        if(!receive_buffer_selected){
-            if(receive_buffer0[i] == 0){
-                receive_data[i] = receive_buffer0[i]; // Cap it off with a 0
-                break;
-            }
-            receive_data[i] = receive_buffer0[i];
-        }else{
-            if(receive_buffer1[i] == 0){
-                receive_data[i] = receive_buffer1[i]; // Cap it off with a 0
-                break;
-            }
+    if(receive_buffer_selected == 0){
+        for(uint16_t i = 0; i < receive_buffer1_index; i++){
             receive_data[i] = receive_buffer1[i];
+        }
+    }else{
+        for(uint16_t i = 0; i < receive_buffer0_index; i++){
+            receive_data[i] = receive_buffer0[i];
         }
     }
 
@@ -326,14 +320,18 @@ uint8_t spi_bit_bang_hard_cancel_receive_async(){
     return 1;
 }
 
-uint8_t spi_bit_bang_sawp_receive_async_buffer(){
+uint8_t spi_bit_bang_swap_receive_async_buffer(){
     while (slave_selected); // Wait for slave not to be selected
-    receive_buffer_selected ^= receive_buffer_selected; // toggle between 0 and 1
+    if(receive_buffer_selected == 0){
+        receive_buffer_selected = 1;
+    }else if(receive_buffer_selected == 1){
+        receive_buffer_selected = 0;
+    }
     return 1;
 }
 
 uint16_t spi_bit_bang_reset_non_active_receive_buffer(){
-    if(!receive_buffer_selected){
+    if(receive_buffer_selected == 1){ // If 0 is selected then reset the 1
         receive_buffer0_index = 0;
         receive_buffer0[0] = 0;
     }else{
@@ -342,4 +340,12 @@ uint16_t spi_bit_bang_reset_non_active_receive_buffer(){
     }
 
     return 1;
+}
+
+uint16_t spi_bit_bang_get_non_active_buffer_size(){
+    if(receive_buffer_selected == 1){
+        return receive_buffer0_index;
+    }else{
+        return receive_buffer1_index;
+    }
 }
