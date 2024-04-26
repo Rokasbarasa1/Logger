@@ -12,8 +12,6 @@ static void MX_USART1_UART_Init(void);
 static void MX_SPI3_Init(void);
 /* Actual functional code -----------------------------------------------*/
 
-
-
 #include "../lib/printf/retarget.h"
 #include "stdio.h"
 #include "string.h"
@@ -355,6 +353,7 @@ int main(void){
                 
                 case LOGGER_INITIALIZE:
                 {
+                    printf("LOGGER_INITIALIZE\n");
                     // We ask how much data should we receive. 
                     slave_set_free();
                     if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
@@ -396,6 +395,7 @@ int main(void){
                 }
                 case LOGGER_RESET:
                 {   
+                    printf("LOGGER_RESET\n");
                     // Reset file name stuff
                     log_file_index = 1;
                     log_file_base_name[0] = 0; // terminate the string
@@ -413,6 +413,8 @@ int main(void){
                 }
                 case LOGGER_WRITE_CHUNK_OF_DATA:
                 {
+                    printf("LOGGER_WRITE_CHUNK_OF_DATA\n");
+
                     slave_set_free();
                     if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
@@ -435,6 +437,7 @@ int main(void){
 
                 case LOGGER_TEST_INTERFACE:
                 {
+                    printf("LOGGER_TEST_INTERFACE\n");
                     uint8_t result = 0b01101010;
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
@@ -442,30 +445,40 @@ int main(void){
                 }
                 case LOGGER_ENTER_ASYNC_MODE:
                 {
+                    printf("LOGGER_ENTER_ASYNC_MODE\n");
+
                     uint8_t result = 1;
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
 
                     // Clean both buffers for leftover data
                     spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_wipe_non_active_receive_buffer();
                     spi_bit_bang_swap_receive_async_buffer();
                     spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_wipe_non_active_receive_buffer();
                     spi_bit_bang_swap_receive_async_buffer();
 
                     while(1){
+                        //Reset the slave buffer
+                        slave_buffer[0] = 0;
                         // Swap the receive buffers so receive can happen while sd write is happening
                         spi_bit_bang_swap_receive_async_buffer();
                         spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer);
-                        if(strlen((char*)slave_buffer) != 0){
-                            uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
-                            //Check for zero terminators before the end one
-                            for(uint16_t i = 0; i<data_size; i++){
-                                if(i == data_size-1){
-                                    break; // This is the last character of the data, it has to be zero
-                                }
+                        uint16_t data_size = strlen((char*)slave_buffer);
 
-                                if(slave_buffer[i] == '\0') slave_buffer[i] = 32; // Ascii code for space ' '
-                            }
+                        printf("String - %d '%s'\n", data_size, slave_buffer);
+
+                        if(data_size != 0){
+                            // uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
+                            //Check for zero terminators before the end one
+                            // for(uint16_t i = 0; i<data_size; i++){
+                            //     if(i == data_size-1){
+                            //         break; // This is the last character of the data, it has to be zero
+                            //     }
+
+                            //     if(slave_buffer[i] == '\0') slave_buffer[i] = 32; // Ascii code for space ' '
+                            // }
 
                             // Check if master wants this async stuff to stop
                             if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
