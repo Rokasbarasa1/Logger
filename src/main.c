@@ -470,7 +470,7 @@ int main(void){
 
                         if(data_size != 0){
                             // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
-                            printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size()-1);
+                            // printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size()-1);
 
                             // Check if master wants this async stuff to stop
                             if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
