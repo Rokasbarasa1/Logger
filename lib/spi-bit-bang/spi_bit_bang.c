@@ -25,7 +25,7 @@ GPIO_TypeDef* m_MISO_port;
 uint16_t m_MISO_pin;
 
 #define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 20000
-volatile uint8_t receive_buffer_selected = 0; // 0-1, 1-2
+volatile uint8_t receive_buffer_selected = 0; // 0- 1 buffer, 1- 2 buffer
 uint8_t receive_buffer0[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
 uint8_t receive_buffer1[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
 
@@ -48,86 +48,68 @@ volatile uint16_t transmit_bytes_queue = 0;
 
 volatile uint8_t slave_selected = 0;
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if(!driver_initialized){
-        return;
-    }
 
-    if(GPIO_Pin == m_SS_pin)
-    {
-        if(HAL_GPIO_ReadPin(m_SS_port, m_SS_pin)){
-            slave_selected = 0;
-            HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
-        }else{
-            slave_selected = 1;
+void spi_bit_bang_ss_interrupt(){
+    if(!driver_initialized) return;
+    
+    // Direct control with minimal branching
+    uint8_t pin_state = HAL_GPIO_ReadPin(m_SS_port, m_SS_pin);
+    slave_selected = pin_state^1;
+    HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 0);
+}
+
+void spi_bit_bang_clk_interrupt(){
+    if(!driver_initialized || !slave_selected) return;
+
+    uint8_t clock_state = HAL_GPIO_ReadPin(m_CLK_port, m_CLK_pin);
+
+    if (clock_state) { // 1 Rising edge READ
+        if (receive_bytes_queue == 0 || receive_bit_skip > 0) { // Check if any bytes need to be read
+            if (receive_bit_skip > 0) --receive_bit_skip; // Reduce the amount of skipped bytes as one was just skipped
+            return;
         }
-    }else if (GPIO_Pin == m_CLK_pin && slave_selected){
-        uint8_t clock_state =  HAL_GPIO_ReadPin(m_CLK_port, m_CLK_pin);
 
-        // clock high - rising
-        // clock low  - falling
+        uint8_t MOSI_state = (uint8_t)((m_MOSI_port->IDR >> m_MOSI_pin) & 0x1); // Read the pin but faster
+        // uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
 
-        // MODE 3
+        // Get the correct selected buffer and its index
+        uint8_t *current_buffer = (receive_buffer_selected == 0) ? receive_buffer0 : receive_buffer1;
+        uint16_t *current_index = (receive_buffer_selected == 0) ? &receive_buffer0_index : &receive_buffer1_index;
 
-        if(clock_state == 1 && receive_bytes_queue != 0 && receive_bit_skip == 0){
-            // Read on rising edge
-            uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
+        if (receive_bit_index_counter == 0) current_buffer[*current_index] = 0; // IMPORTANT, reset the byte that will be written to. It makes sense not to but in testing this was essential for it to work.
 
-            if(receive_buffer_selected == 0){
-                // Reset when reading the 0 bit as the first action.
-                if(!receive_bit_index_counter){
-                    receive_buffer0[receive_buffer0_index] = 0;
-                }
-                receive_buffer0[receive_buffer0_index] = receive_buffer0[receive_buffer0_index] | (MOSI_state << (7 - receive_bit_index_counter));
-
-                receive_bit_index_counter++;
-                if(receive_bit_index_counter == 8){
-                    // Do not ever overwrite the last byte of the buffer and dont move in the buffer if end is reached
-                    if(SPI_BIT_BANG_RECEIVE_BUFFER_SIZE-1 > receive_buffer0_index+1){
-                        receive_buffer0_index++;
-                    }
-                    receive_bytes_queue--;
-                    receive_bit_index_counter = 0;
-                }
-            }else{
-                // Reset when reading the 0 bit as the first action.
-                if(!receive_bit_index_counter){
-                    receive_buffer1[receive_buffer1_index] = 0;
-                }
-                receive_buffer1[receive_buffer1_index] = receive_buffer1[receive_buffer1_index] | (MOSI_state << (7 - receive_bit_index_counter));
-
-                receive_bit_index_counter++;
-                if(receive_bit_index_counter == 8){
-                    // Do not ever overwrite the last byte of the buffer and dont move in the buffer if end is reached
-                    if(SPI_BIT_BANG_RECEIVE_BUFFER_SIZE-1 > receive_buffer1_index+1){
-                        receive_buffer1_index++;
-                    }
-                    receive_bytes_queue--;
-                    receive_bit_index_counter = 0;
-                }
+        current_buffer[*current_index] |= MOSI_state << (7 - receive_bit_index_counter); // Place the mosi bit into the buffer at index
+        if (++receive_bit_index_counter == 8) { // If last bit reached move the index and reset bit index
+            if (SPI_BIT_BANG_RECEIVE_BUFFER_SIZE-1 > *current_index+1) { // Prevent from the last byte being overwritten
+                // Do not ever overwrite the last byte of the buffer and dont move in the buffer if end is reached
+                (*current_index)++;
             }
-        }else if(clock_state == 0 && transmit_bytes_queue != 0){
-            // Write on falling edge
-            uint8_t MISO_state = (transmit_buffer[transmit_buffer_index] >> (7 - transmit_bit_index_counter)) & 0x01;
-            HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, MISO_state);
+            receive_bytes_queue--;
+            receive_bit_index_counter = 0;
+        }
+        // HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 1);
+        // HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 0);
 
-            transmit_bit_index_counter++;
-            if(transmit_bit_index_counter == 8){
-                if(SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE-1 > transmit_buffer_index+1){
-                    transmit_buffer_index++;
-                }
-                transmit_bytes_queue--;
-                transmit_bit_index_counter = 0;
+
+    } else { // 0 Falling edge WRITE
+        if (transmit_bytes_queue == 0) { // Check if something needs to be transmitted
+            HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET); // Always default to low signal on MISO for cleanness on logic analyzer
+            return;
+        }
+
+        // Get the bit that needs to be written to the MISO pin next
+        uint8_t MISO_state = (transmit_buffer[transmit_buffer_index] >> (7 - transmit_bit_index_counter)) & 0x01;
+        HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, MISO_state);
+        if (++transmit_bit_index_counter == 8) { // If last bit reached move the index and reset bit index
+            if(SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE-1 > transmit_buffer_index+1){
+                // Do not go more than the last byte in the transmit buffer
+                transmit_buffer_index++;
             }
-        }else if(clock_state == 0 && transmit_bytes_queue == 0){
-            HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET);
-        }else if(clock_state == 1 && receive_bit_skip != 0){
-            receive_bit_skip--;
+            transmit_bytes_queue--;
+            transmit_bit_index_counter = 0;
         }
     }
 }
-
 
 // interrupt to sense when it is selected
 
@@ -162,7 +144,6 @@ uint8_t spi_bit_bang_initialize(GPIO_TypeDef* SS_port, uint16_t SS_pin, GPIO_Typ
     m_MISO_port = MISO_port;
     m_MISO_pin = MISO_pin;
 
-    
     driver_initialized = 1;
     return 1;
 }
