@@ -290,19 +290,25 @@ uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t 
 
     if(receive_buffer_selected == 0){
         for(uint16_t i = 0; i < receive_buffer1_index; i++){
-            if(receive_buffer1[i] == '\0' && i == receive_buffer1_index - 1 ){
+            // if(receive_buffer1[i] == '\0' && i != receive_buffer1_index - 1 ){
+            //     receive_data[i] = 'X';
+            // }else{
+            //     receive_data[i] = receive_buffer1[i];
+            // }
+
+            if(receive_buffer1[i] == '\0' && i != receive_buffer1_index - 1 ){
                 skipped_bytes_buffer1++;
+            }else{
+                receive_data[i-skipped_bytes_buffer1] = receive_buffer1[i];
             }
-            receive_data[i] = receive_buffer1[i + skipped_bytes_buffer1];
-            // receive_data[i] = receive_buffer1[i];
         }
     }else{
         for(uint16_t i = 0; i < receive_buffer0_index; i++){
-            if(receive_buffer1[i] == '\0' && i == receive_buffer0_index - 1 ){
+            if(receive_buffer0[i] == '\0' && i != receive_buffer0_index - 1 ){
                 skipped_bytes_buffer0++;
+            }else{
+                receive_data[i - skipped_bytes_buffer0] = receive_buffer0[i];
             }
-            receive_data[i] = receive_buffer0[i + skipped_bytes_buffer0];
-            // receive_data[i] = receive_buffer0[i];
         }
     }
 

@@ -462,23 +462,15 @@ int main(void){
                     while(1){
                         //Reset the slave buffer
                         slave_buffer[0] = 0;
+
                         // Swap the receive buffers so receive can happen while sd write is happening
                         spi_bit_bang_swap_receive_async_buffer();
                         spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer);
                         uint16_t data_size = strlen((char*)slave_buffer);
 
-                        printf("String - %d '%s'\n", data_size, slave_buffer);
-
                         if(data_size != 0){
-                            // uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
-                            //Check for zero terminators before the end one
-                            // for(uint16_t i = 0; i<data_size; i++){
-                            //     if(i == data_size-1){
-                            //         break; // This is the last character of the data, it has to be zero
-                            //     }
-
-                            //     if(slave_buffer[i] == '\0') slave_buffer[i] = 32; // Ascii code for space ' '
-                            // }
+                            // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
+                            printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size()-1);
 
                             // Check if master wants this async stuff to stop
                             if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
@@ -486,12 +478,13 @@ int main(void){
                                 spi_bit_bang_hard_cancel_receive_async();
                                 break;
                             }
+
+
                             // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.
                             // Only the first message would be put on the sd card. Need to detect if in the lenght of the data there are more than one '\0'
                             // Perform write to sd card
                             sd_write_data_to_file((char*)slave_buffer);
-                            uint8_t result_save = sd_save_file();
-
+                            sd_save_file();
                             // Consider checking if the result of save is good to continue operation
                         }
                         spi_bit_bang_reset_non_active_receive_buffer();
@@ -500,7 +493,6 @@ int main(void){
                     }
                     break;
                 }
-                
                 default:
                     slave_set_free();
                     break;
