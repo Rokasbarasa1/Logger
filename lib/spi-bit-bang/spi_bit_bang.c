@@ -48,7 +48,6 @@ volatile uint16_t transmit_bytes_queue = 0;
 
 volatile uint8_t slave_selected = 0;
 
-
 void spi_bit_bang_ss_interrupt(){
     if(!driver_initialized) return;
     
@@ -68,7 +67,6 @@ void spi_bit_bang_clk_interrupt(){
             if (receive_bit_skip > 0) --receive_bit_skip; // Reduce the amount of skipped bytes as one was just skipped
             return;
         }
-
         uint8_t MOSI_state = (uint8_t)((m_MOSI_port->IDR >> m_MOSI_pin) & 0x1); // Read the pin but faster
         // uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
 
@@ -87,9 +85,6 @@ void spi_bit_bang_clk_interrupt(){
             receive_bytes_queue--;
             receive_bit_index_counter = 0;
         }
-        // HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 1);
-        // HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 0);
-
 
     } else { // 0 Falling edge WRITE
         if (transmit_bytes_queue == 0) { // Check if something needs to be transmitted
@@ -249,7 +244,8 @@ uint8_t spi_bit_bang_transmit(uint8_t * transmit_data, uint16_t transmit_data_si
     transmit_bytes_queue += transmit_data_size;
     if(!wait_for_transmit_queue_empty(timeout_ms)) return 0;
     // add a skip for receive as it is too quick
-    receive_bit_skip = 1;
+    // Not relevant anymore as with more speed this is not problem? Or maybe because of mode 3.
+    receive_bit_skip = 0; 
     if(!wait_for_skips(timeout_ms)) return 0; // Skips are important for timing
     transmit_buffer_index -= transmit_data_size;
 
