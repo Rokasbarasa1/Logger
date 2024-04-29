@@ -459,6 +459,8 @@ int main(void){
                     spi_bit_bang_wipe_non_active_receive_buffer();
                     spi_bit_bang_swap_receive_async_buffer();
 
+                    // slave_set_busy(); // For debugging from the master side. Master uses this pin to see when it is active
+
                     while(1){
                         //Reset the slave buffer
                         slave_buffer[0] = 0;
@@ -467,8 +469,8 @@ int main(void){
                         spi_bit_bang_swap_receive_async_buffer();
                         spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer);
                         uint16_t data_size = strlen((char*)slave_buffer);
-
                         if(data_size != 0){
+                            // Debugging
                             // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
                             // printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size()-1);
 

@@ -86,6 +86,11 @@ void spi_bit_bang_clk_interrupt(){
             receive_bit_index_counter = 0;
         }
 
+        // Maybe placebo but it helps the read read data somehow
+        HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 1);
+        HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, 0);
+        // Good for debugging reading also. Doesn't affect communication
+
     } else { // 0 Falling edge WRITE
         if (transmit_bytes_queue == 0) { // Check if something needs to be transmitted
             HAL_GPIO_WritePin(m_MISO_port, m_MISO_pin, GPIO_PIN_RESET); // Always default to low signal on MISO for cleanness on logic analyzer
