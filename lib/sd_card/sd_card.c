@@ -84,7 +84,7 @@ uint8_t sd_open_file(const char *file_name, uint8_t instruction){
     return 1;
 }
 
-uint8_t sd_write_data_to_file(const char *data){
+uint8_t sd_write_string_data_to_file(const char *data){
     // Why does this give random value??? I wrote 156 bytes and got a result form this of 160, what does that mean???
     sd_result = f_puts(data, &sd_file);
     
@@ -94,6 +94,46 @@ uint8_t sd_write_data_to_file(const char *data){
 #endif
         return 0;
     }
+#if(SD_CARD_DEBUG)
+    printf("SD card: wrote data\n");
+#endif
+    return 1;
+};
+
+uint8_t sd_write_byte_data_to_file(const char *data, uint16_t length){
+
+    // f_write doesn't like when more than 1000 bytes are given to it at once. Divide into multiple writes
+    uint8_t* current_data_position = (uint8_t *)data;
+    uint16_t remaining_length = length;
+    uint16_t bytes_written = 0;
+    uint16_t bytes_to_write = 0;
+
+
+    while(remaining_length > 0) {
+
+        bytes_to_write = (remaining_length > 1000) ? 1000: remaining_length;
+        UINT bytes_written_temp = 0;
+        sd_result = f_write(&sd_file, current_data_position, bytes_to_write, &bytes_written_temp);
+
+        if(sd_result != FR_OK) {
+#if(SD_CARD_DEBUG)
+            printf("SD card: failed to write data %d, %d / %d\n", sd_result, bytes_written, length);
+#endif
+            return 0;
+        }
+
+        if (bytes_written_temp != bytes_to_write) {
+#if(SD_CARD_DEBUG)
+            printf("SD card: not all data was written %d / %d\n", bytes_written_temp, bytes_to_write);
+#endif
+            return 0;
+        }
+
+        bytes_written += bytes_written_temp;
+        current_data_position += bytes_written_temp; // Move  the pointer forward by how much was written
+        remaining_length -= bytes_written_temp;
+    }
+
 #if(SD_CARD_DEBUG)
     printf("SD card: wrote data\n");
 #endif

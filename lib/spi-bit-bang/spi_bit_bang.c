@@ -35,6 +35,8 @@ volatile uint16_t skipped_bytes_buffer0 = 0;
 volatile uint16_t skipped_bytes_buffer1 = 0;
 volatile uint8_t receive_bit_index_counter = 0;
 volatile uint16_t receive_bit_skip = 0;
+volatile uint16_t skip_start_bits = 0;
+volatile uint16_t skip_start_bits_counter = 0;
 
 // SHared between both buffers 
 volatile uint16_t receive_bytes_queue = 0;
@@ -67,6 +69,11 @@ void spi_bit_bang_clk_interrupt(){
             if (receive_bit_skip > 0) --receive_bit_skip; // Reduce the amount of skipped bytes as one was just skipped
             return;
         }
+        if(skip_start_bits > skip_start_bits_counter){
+            skip_start_bits_counter++; // Skip this bit and increment the skipped bit counter
+            return;
+        }
+
         uint8_t MOSI_state = (uint8_t)((m_MOSI_port->IDR >> m_MOSI_pin) & 0x1); // Read the pin but faster
         // uint8_t MOSI_state = HAL_GPIO_ReadPin(m_MOSI_port, m_MOSI_pin);
 
@@ -84,6 +91,7 @@ void spi_bit_bang_clk_interrupt(){
             }
             receive_bytes_queue--;
             receive_bit_index_counter = 0;
+            skip_start_bits_counter = 0;
         }
 
         // Maybe placebo but it helps the read read data somehow
@@ -264,7 +272,7 @@ uint8_t spi_bit_bang_receive_async(){
 }
 
 
-uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data){
+uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data, uint8_t skip_zeros){
     while (slave_selected); // Wait for slave not to be selected
 
     // SKIP BYTES THAT ARE 0 BEFORE THE END THAT WAY YOU DONT HAVE TO LOOK FOR THEM AFTERWARDS
@@ -272,22 +280,24 @@ uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t 
 
     if(receive_buffer_selected == 0){
         for(uint16_t i = 0; i < receive_buffer1_index; i++){
-            // if(receive_buffer1[i] == '\0' && i != receive_buffer1_index - 1 ){
-            //     receive_data[i] = 'X';
-            // }else{
-            //     receive_data[i] = receive_buffer1[i];
-            // }
-
-            if(receive_buffer1[i] == '\0' && i != receive_buffer1_index - 1 ){
-                skipped_bytes_buffer1++;
+            if(skip_zeros){
+                if(receive_buffer1[i] == '\0' && i != receive_buffer1_index - 1 ){
+                    skipped_bytes_buffer1++;
+                }else{
+                    receive_data[i-skipped_bytes_buffer1] = receive_buffer1[i];
+                }
             }else{
                 receive_data[i-skipped_bytes_buffer1] = receive_buffer1[i];
             }
         }
     }else{
         for(uint16_t i = 0; i < receive_buffer0_index; i++){
-            if(receive_buffer0[i] == '\0' && i != receive_buffer0_index - 1 ){
-                skipped_bytes_buffer0++;
+            if(skip_zeros){
+                if(receive_buffer0[i] == '\0' && i != receive_buffer0_index - 1 ){
+                    skipped_bytes_buffer0++;
+                }else{
+                    receive_data[i - skipped_bytes_buffer0] = receive_buffer0[i];
+                }
             }else{
                 receive_data[i - skipped_bytes_buffer0] = receive_buffer0[i];
             }
@@ -367,4 +377,8 @@ uint16_t spi_bit_bang_get_non_active_buffer_size(){
         return receive_buffer1_index - skipped_bytes_buffer1;
         // return receive_buffer1_index;
     }
+}
+
+void spi_bit_bang_set_start_skip_bits(uint8_t skip_bits){
+    skip_start_bits = skip_bits;
 }

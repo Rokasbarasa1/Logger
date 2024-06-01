@@ -11,10 +11,11 @@ uint8_t spi_bit_bang_initialize(GPIO_TypeDef* SS_port, uint16_t SS_pin, GPIO_Typ
 uint8_t spi_bit_bang_receive(uint8_t * receive_data, uint16_t receive_data_size, uint16_t timeout_ms);
 uint8_t spi_bit_bang_transmit(uint8_t * transmit_data, uint16_t transmit_data_size, uint16_t timeout_ms);
 uint8_t spi_bit_bang_receive_async();
-uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data);
+uint8_t spi_bit_bang_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data, uint8_t skip_zeros);
 uint8_t spi_bit_bang_soft_cancel_receive_async();
 uint8_t spi_bit_bang_hard_cancel_receive_async();
 uint8_t spi_bit_bang_swap_receive_async_buffer();
 uint8_t spi_bit_bang_reset_non_active_receive_buffer();
 uint8_t spi_bit_bang_wipe_non_active_receive_buffer();
 uint16_t spi_bit_bang_get_non_active_buffer_size();
+void spi_bit_bang_set_start_skip_bits(uint8_t skip_bits);

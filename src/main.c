@@ -25,17 +25,18 @@ void init_loop_timer();
 void handle_loop_timing();
 void init_STM32_peripherals();
 
-// SPI1 pins
+// SPI1 pins (Receives commands form the main controller )
+// PA3  SPI1 Slave ready
 // PA4  SPI1 SS
 // PA5  SPI1 SCK
 // PA6  SPI1 MISO
 // PA7  SPI1 MOSI
 
-// SPI3 pins
+// SPI3 pins (communication to sd card)
+// PA15 SPI3 CS
 // PB3  SPI3 SCK
 // PB4  SPI3 MISO
 // PB5  SPI3 MOSI
-// 
 
 #define REFRESH_RATE_HZ 1
 
@@ -114,6 +115,7 @@ int main(void){
     RetargetInit(&huart1);
     MX_FATFS_Init();
 
+    // Reset the pins
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
@@ -121,14 +123,37 @@ int main(void){
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 
 
-    printf("Looping\n");
-
     spi_bit_bang_initialize(GPIOA, GPIO_PIN_4, GPIOA, GPIO_PIN_5, GPIOA, 7/*GPIO_PIN_7 this is a bit faster */, GPIOA, GPIO_PIN_6);
 
     while (1){
+        // Turn off debugging led
+        // HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
         uint8_t spi_slave_result_receive = spi_bit_bang_receive(slave_buffer, 1, 1000);
 
         if(spi_slave_result_receive){
+            // Turn on led for quick debugging
+            // HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+
+            // Log command on the MISO line of SPI1
+            // This does not affect the spi communication besides making it a bit slower
+            // for(uint8_t i = 0; i < 8; i++){
+            //     uint8_t MISO_state = (slave_buffer[0] >> (7 - i)) & 0x01;
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+
+            //     volatile uint32_t count = 0;
+
+            //     for(count = 0; count< 50; count++);
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, MISO_state);
+            //     for(count = 0; count< 50; count++);
+            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+            //     for(count = 0; count< 50; count++);
+            // }
+            // Pull the MISO pin low
+            // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+
             slave_set_busy();
             switch (slave_buffer[0])
             {
@@ -203,7 +228,7 @@ int main(void){
 
                     char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
 
-                    uint8_t result = sd_write_data_to_file(extracted_string);
+                    uint8_t result = sd_write_string_data_to_file(extracted_string);
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
                     free(extracted_string);
@@ -353,7 +378,6 @@ int main(void){
                 
                 case LOGGER_INITIALIZE:
                 {
-                    printf("LOGGER_INITIALIZE\n");
                     // We ask how much data should we receive. 
                     slave_set_free();
                     if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
@@ -374,7 +398,7 @@ int main(void){
 
                             // Quit of the string is too big
                             if(log_file_name_length > LOG_FILE_NAME_MAX){
-                                // printf("Log file string too long\n");
+                                printf("Log file string too long\n");
                                 return 0;
                             }
                             // printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
@@ -395,7 +419,6 @@ int main(void){
                 }
                 case LOGGER_RESET:
                 {   
-                    printf("LOGGER_RESET\n");
                     // Reset file name stuff
                     log_file_index = 1;
                     log_file_base_name[0] = 0; // terminate the string
@@ -411,9 +434,8 @@ int main(void){
 
                     break;
                 }
-                case LOGGER_WRITE_CHUNK_OF_DATA:
+                case LOGGER_WRITE_CHUNK_OF_STRING_DATA:
                 {
-                    printf("LOGGER_WRITE_CHUNK_OF_DATA\n");
 
                     slave_set_free();
                     if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
@@ -427,7 +449,28 @@ int main(void){
                     slave_set_busy();
 
                     // The result of this one is weird, ignore it
-                    sd_write_data_to_file((char*)slave_buffer);
+                    sd_write_string_data_to_file((char*)slave_buffer);
+                    uint8_t result_save  = sd_save_file();
+
+                    slave_set_free();
+                    spi_bit_bang_transmit(&result_save, 1, 1000);
+                    break;
+                }
+                case LOGGER_WRITE_CHUNK_OF_BYTE_DATA:
+                {
+                    slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    slave_set_busy();
+
+                    volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
+
+                    // Receive the base file name
+                    slave_set_free();
+                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    slave_set_busy();
+
+                    // The result of this one is weird, ignore it
+                    sd_write_byte_data_to_file((char*)slave_buffer, amount_of_data_to_receive);
                     uint8_t result_save  = sd_save_file();
 
                     slave_set_free();
@@ -437,15 +480,22 @@ int main(void){
 
                 case LOGGER_TEST_INTERFACE:
                 {
-                    printf("LOGGER_TEST_INTERFACE\n");
-                    uint8_t result = 0b01101010;
+                    uint8_t result = LOGGER_INTERFACE_TEST_VALUE;
                     slave_set_free();
                     spi_bit_bang_transmit(&result, 1, 1000);
                     break;
                 }
-                case LOGGER_ENTER_ASYNC_MODE:
+                case LOGGER_TEST_INTERFACE_BROKEN:
                 {
-                    printf("LOGGER_ENTER_ASYNC_MODE\n");
+                    // The logger understands that the spi of the master is stupid
+                    uint8_t result = LOGGER_INTERFACE_TEST_VALUE;
+                    // spi_bit_bang_set_start_skip_bits(1); // Data is shifted to the right by one so start looking for that last bit instead
+                    slave_set_free();
+                    spi_bit_bang_transmit(&result, 1, 1000);
+                    break;
+                }
+                case LOGGER_ENTER_ASYNC_STRING_MODE:
+                {
 
                     uint8_t result = 1;
                     slave_set_free();
@@ -467,7 +517,7 @@ int main(void){
 
                         // Swap the receive buffers so receive can happen while sd write is happening
                         spi_bit_bang_swap_receive_async_buffer();
-                        spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer);
+                        spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer, 1);
                         uint16_t data_size = strlen((char*)slave_buffer);
                         if(data_size != 0){
                             // Debugging
@@ -485,11 +535,64 @@ int main(void){
                             // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.
                             // Only the first message would be put on the sd card. Need to detect if in the lenght of the data there are more than one '\0'
                             // Perform write to sd card
-                            sd_write_data_to_file((char*)slave_buffer);
+                            sd_write_string_data_to_file((char*)slave_buffer);
                             sd_save_file();
                             // Consider checking if the result of save is good to continue operation
                         }
                         spi_bit_bang_reset_non_active_receive_buffer();
+
+                        spi_bit_bang_receive_async();
+                    }
+                    break;
+                }
+                case LOGGER_ENTER_ASYNC_BYTE_MODE:
+                {
+                    uint8_t result = 1;
+                    slave_set_free();
+                    spi_bit_bang_transmit(&result, 1, 1000);
+
+                    // Clean both buffers for leftover data
+                    spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_wipe_non_active_receive_buffer();
+                    spi_bit_bang_swap_receive_async_buffer();
+                    spi_bit_bang_reset_non_active_receive_buffer();
+                    spi_bit_bang_wipe_non_active_receive_buffer();
+                    spi_bit_bang_swap_receive_async_buffer();
+
+                    while(1){
+                        //Reset the slave buffer
+                        slave_buffer[0] = 0;
+
+                        // Swap the receive buffers so receive can happen while sd write is happening
+                        spi_bit_bang_swap_receive_async_buffer();
+                        spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer, 0);
+
+                        slave_set_free();
+
+                        uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
+                        if(data_size != 0){
+                            // Debugging
+                            // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
+                            printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size());
+
+                            // Check if master wants this async stuff to stop
+                            // if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
+                            //     // Clean up everything
+                            //     spi_bit_bang_hard_cancel_receive_async();
+                            //     break;
+                            // }
+
+
+                            // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.
+                            // Only the first message would be put on the sd card. Need to detect if in the lenght of the data there are more than one '\0'
+                            // Perform write to sd card
+                            sd_write_byte_data_to_file((char*)slave_buffer, data_size);
+                            sd_save_file();
+                            // Consider checking if the result of save is good to continue operation
+                        }
+
+                        spi_bit_bang_reset_non_active_receive_buffer();
+                        slave_set_free();
 
                         spi_bit_bang_receive_async();
                     }
