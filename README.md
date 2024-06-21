@@ -16,7 +16,3 @@ How the sd card folder looks like:
 How the file looks like with quadcopter data i logged:
 
 ![Log file content example](./images/file_contents.png)
-
-How the setup currently looks like. I need to do something about the long cables of the sd card stm32 and the sd card module:
-
-![Setup example](./images/setup.jpg)
