@@ -35,7 +35,7 @@ uint8_t sd_card_initialize(){
 #if(SD_CARD_DEBUG)
         printf("SD card not mounted\n");
 #endif
-        return 0;
+        return sd_result;
     }
 
 #if(SD_CARD_DEBUG)
@@ -46,16 +46,17 @@ uint8_t sd_card_initialize(){
     sd_total_space = (uint32_t)((sd_pointer_fatfs_structure->n_fatent - 2) * sd_pointer_fatfs_structure->csize * 0.5);
     sd_free_space = (uint32_t)(sd_free_clusters * sd_pointer_fatfs_structure->csize * 0.5);
 
+
     if(sd_result != FR_OK) {
 #if(SD_CARD_DEBUG)
         printf("Sd card: flailed to get size\n");
 #endif
-        return 0;
+        return sd_result;
     }
 #if(SD_CARD_DEBUG)
     printf("Total space: %lu bytes.  Free space: %lu bytes\n", sd_total_space, sd_free_space);
 #endif
-    return 1;
+    return 0;
 }
 
 uint8_t sd_open_file(const char *file_name, uint8_t instruction){
@@ -275,6 +276,10 @@ uint8_t sd_save_file(){
     }
 
     return 1;
+}
+
+FRESULT sd_get_result(){
+    return sd_result;
 }
 
 // Example code ************************************************

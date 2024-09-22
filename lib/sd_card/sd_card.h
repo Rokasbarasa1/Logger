@@ -26,6 +26,7 @@ enum t_logger_commands {
     LOGGER_SD_BUFFER_SIZE = 16,
 
     LOGGER_INITIALIZE = 17,
+    LOGGER_GET_FILE_INDEX = 27,
     LOGGER_RESET = 18,
     LOGGER_WRITE_CHUNK_OF_STRING_DATA = 20,
     LOGGER_WRITE_CHUNK_OF_BYTE_DATA = 21,
@@ -61,3 +62,4 @@ uint32_t sd_card_get_selected_file_size();
 uint8_t sd_write_buffer_to_file();
 uint8_t sd_file_exists(const char *file_name);
 uint8_t sd_save_file();
+FRESULT sd_get_result();

@@ -391,19 +391,21 @@ int main(void){
                     slave_set_busy();
 
                     uint8_t result_sd_initialize = sd_card_initialize();
-                    if(result_sd_initialize){
+                    if(result_sd_initialize == FR_OK){
                         // printf("Looking for viable log file.\n");
                         do{
                             uint16_t log_file_name_length = sprintf(log_file_name, "%d%s", log_file_index, slave_buffer);
 
                             // Quit of the string is too big
                             if(log_file_name_length > LOG_FILE_NAME_MAX){
-                                printf("Log file string too long\n");
-                                return 0;
+                                printf("Log file string too long or ran out of string space due to incrementing\n");
+                                break;
                             }
                             // printf("Looking for viable log file. Testing file name: %s\n", log_file_name);
                             log_file_location_found = !sd_file_exists(log_file_name);
-                            log_file_index++;
+
+                            // If file is found then go to the next index
+                            if(!log_file_location_found) log_file_index++;
                         }
                         while(!log_file_location_found);
                         // printf("Found viable log file.\n");
@@ -412,11 +414,23 @@ int main(void){
                         result_sd_initialize = sd_open_file(log_file_name, FA_WRITE);
                         sd_set_file_cursor_offset(sd_card_get_selected_file_size());
                     }
-                    
+
                     slave_set_free();
-                    if(!spi_bit_bang_transmit(&result_sd_initialize, 1, 1000)) break;
+                    uint8_t result = sd_get_result();
+                    if(!spi_bit_bang_transmit(&result, 1, 1000)) break;
                     break;
                 }
+                case LOGGER_GET_FILE_INDEX:
+                {
+                    uint8_t log_file_index_msb = (0xFF00 & log_file_index) >> 8;
+                    uint8_t log_file_index_lsb = 0xFF & log_file_index;
+                    uint8_t response[] = {log_file_index_msb, log_file_index_lsb};
+
+                    slave_set_free();
+                    spi_bit_bang_transmit(response, 2, 1000);
+                    break;
+                }
+
                 case LOGGER_RESET:
                 {   
                     // Reset file name stuff
@@ -519,6 +533,7 @@ int main(void){
                         spi_bit_bang_swap_receive_async_buffer();
                         spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer, 1);
                         uint16_t data_size = strlen((char*)slave_buffer);
+                        slave_set_busy();
                         if(data_size != 0){
                             // Debugging
                             // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
@@ -528,6 +543,8 @@ int main(void){
                             if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
                                 // Clean up everything
                                 spi_bit_bang_hard_cancel_receive_async();
+                                slave_set_free();
+                                spi_bit_bang_transmit(&result, 1, 1000);
                                 break;
                             }
 
@@ -570,17 +587,23 @@ int main(void){
                         slave_set_free();
 
                         uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
+                        slave_set_busy();
                         if(data_size != 0){
                             // Debugging
                             // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
-                            printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size());
+                            printf("%d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size());
 
                             // Check if master wants this async stuff to stop
-                            // if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
-                            //     // Clean up everything
-                            //     spi_bit_bang_hard_cancel_receive_async();
-                            //     break;
-                            // }
+                            if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
+                                // Clean up everything
+                                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+                                HAL_Delay(250);
+                                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+                                spi_bit_bang_hard_cancel_receive_async();
+                                slave_set_free();
+                                spi_bit_bang_transmit(&result, 1, 1000);
+                                break;
+                            }
 
 
                             // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.

@@ -317,7 +317,7 @@ uint8_t spi_bit_bang_soft_cancel_receive_async(){
 
 uint8_t spi_bit_bang_hard_cancel_receive_async(){
     // Stop ongoing operation immediately
-    slave_selected = 0;
+    // slave_selected = 0;
     // Reset operation parameter
     receive_bytes_queue = 0;
     receive_bit_index_counter = 0;
