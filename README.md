@@ -1,4 +1,5 @@
 # STM32-SD logger
+![IMG_3483](https://github.com/Rokasbarasa1/Logger/assets/50622827/812367ee-31c9-4dcf-85ca-b9570796fe11)
 
 Spi slave that acts as an interface to a sd card. Max spi speed 300Kb/s. Has commands for low level control of the sd card and higher level commands that just setup everything for logging.
 
@@ -15,7 +16,3 @@ How the sd card folder looks like:
 How the file looks like with quadcopter data i logged:
 
 ![Log file content example](./images/file_contents.png)
-
-How the setup currently looks like. I need to do something about the long cables of the sd card stm32 and the sd card module:
-
-![Setup example](./images/setup.jpg)
