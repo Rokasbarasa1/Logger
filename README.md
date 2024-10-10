@@ -7,7 +7,7 @@ Uses bit bang spi due to the Hal's slave spi implementation being crap. This cap
 
 
 An example of how the transfer look like when transferring 50 bytes in async mode on the master:
-![SPI transfer example](./images/logger_max_async_speed_analyzer.png.png)
+![SPI transfer example](./images/images/logger_max_async_speed_analyzer.png)
 
 An example of how the transfer look like when transferring 120 bytes:
 
