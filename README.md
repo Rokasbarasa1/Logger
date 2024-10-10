@@ -1,5 +1,5 @@
 # STM32-SD logger
-![IMG_3483](https://github.com/Rokasbarasa1/Logger/assets/50622827/812367ee-31c9-4dcf-85ca-b9570796fe11)
+![IMG_4903](https://github.com/user-attachments/assets/645b17e6-43e6-43a9-9442-c1b80d204d96)
 
 Spi slave that acts as an interface to a sd card. Max spi speed 300Kb/s. Has commands for low level control of the sd card and higher level commands that just setup everything for logging.
 
