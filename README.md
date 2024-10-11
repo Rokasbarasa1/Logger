@@ -1,7 +1,7 @@
 # STM32-SD logger
 ![IMG_4903](https://github.com/user-attachments/assets/645b17e6-43e6-43a9-9442-c1b80d204d96)
 
-Spi slave that acts as an interface to a sd card. Max spi speed 300Kb/s. Has commands for low level control of the sd card and higher level commands that just setup everything for logging.
+Spi slave that acts as an interface to a sd card. Max spi speed 390Kb/s. Has commands for low level control of the sd card and higher level commands that just setup everything for logging.
 
 Uses bit bang spi due to the Hal's slave spi implementation being crap. This caps it to a low spi speed but that is still enough to log data at a useful rate in real time. I got 120 characters strings sending at 234 Hz using my quadcopter.
 
