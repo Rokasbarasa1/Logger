@@ -123,7 +123,11 @@ int main(void){
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 
 
-    spi_bit_bang_initialize(GPIOA, GPIO_PIN_4, GPIOA, GPIO_PIN_5, GPIOA, 7/*GPIO_PIN_7 this is a bit faster */, GPIOA, GPIO_PIN_6);
+    spi_bit_bang_initialize(
+        GPIOA, GPIO_PIN_4, 
+        GPIOA, GPIO_PIN_5, 
+        GPIOA, GPIO_PIN_7, 
+        GPIOA, GPIO_PIN_6);
 
     while (1){
         // Turn off debugging led
