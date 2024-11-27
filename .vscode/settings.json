@@ -25,7 +25,8 @@
         "sd_card.h": "c",
         "integer.h": "c",
         "stm32_hal_legacy.h": "c",
-        "spi_bit_bang.h": "c"
+        "spi_bit_bang.h": "c",
+        "spi_dma_slave.h": "c"
     },
     "cSpell.words": [
         "FATFS",

@@ -282,6 +282,14 @@ FRESULT sd_get_result(){
     return sd_result;
 }
 
+uint8_t sd_check_file_is_valid(){
+    // Check if the file object is valid
+    if (sd_file.obj.fs == NULL) {
+        return 0; // File object is invalid
+    }
+    // Additional checks can be added here if necessary
+    return 1; // File object is valid
+}
 // Example code ************************************************
     // sd_card_initialize();
     // sd_open_file("Quadcopter.txt", FA_WRITE | FA_READ | FA_OPEN_ALWAYS);

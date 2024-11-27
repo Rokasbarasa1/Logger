@@ -63,3 +63,5 @@ uint8_t sd_write_buffer_to_file();
 uint8_t sd_file_exists(const char *file_name);
 uint8_t sd_save_file();
 FRESULT sd_get_result();
+
+uint8_t sd_check_file_is_valid();

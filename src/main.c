@@ -19,11 +19,8 @@ static void MX_SPI3_Init(void);
 #include <stdlib.h>
 
 #include "../lib/sd_card/sd_card.h"
-#include "../lib/spi-bit-bang/spi_bit_bang.h"
-
-void init_loop_timer();
-void handle_loop_timing();
-void init_STM32_peripherals();
+// #include "../lib/spi-bit-bang/spi_dma_slave.h" // Old and slower SPI
+#include "../lib/spi_dma_slave/spi_dma_slave.h"
 
 // SPI1 pins (Receives commands form the main controller )
 // PA3  SPI1 Slave ready
@@ -38,27 +35,28 @@ void init_STM32_peripherals();
 // PB4  SPI3 MISO
 // PB5  SPI3 MOSI
 
-#define REFRESH_RATE_HZ 1
-
-// handling loop timing ###################################################################################
-uint32_t loop_start_time = 0;
-uint32_t loop_end_time = 0;
-int16_t delta_loop_time = 0;
-
 // SD card ################################################################################################
 // For deciding which log file to log to
 uint16_t log_file_index = 1;
-char log_file_base_name[] = "Quadcopter.txt";
 #define LOG_FILE_NAME_MAX 45
 char log_file_name[LOG_FILE_NAME_MAX];
 uint8_t log_file_location_found = 0;
-uint8_t sd_card_initialized = 0;
 uint8_t log_loop_count = 0;
 
-
 // SPI slave stuff functionality
-#define SLAVE_BUFFER_SIZE 10000
+#define SLAVE_BUFFER_SIZE 30000
 uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
+
+// Check if value is in an array already
+uint8_t value_in_array(uint8_t * array, uint8_t array_size, uint8_t value){
+    for (uint8_t i = 0; i < array_size; i++){
+        if(array[i] == value){
+            return 1;
+        }
+    }
+    
+    return 0;
+}
 
 /**
  * Extracts and returns a dynamically allocated string from SPI received data starting from a specific index.
@@ -94,7 +92,6 @@ char* extract_string_from_spi_data_at_index(uint8_t* data, size_t size, size_t s
     return string;
 }
 
-
 void slave_set_busy(){
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
 }
@@ -102,6 +99,30 @@ void slave_set_busy(){
 void slave_set_free(){
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 }
+
+// DMA callbacks, without these DMA does not work
+void DMA2_Stream0_IRQHandler(void){
+    HAL_DMA_IRQHandler(spi_dma_slave_get_dma_rx_handle());
+}
+
+void DMA2_Stream2_IRQHandler(void){
+    HAL_DMA_IRQHandler(spi_dma_slave_get_dma_tx_handle());
+}
+
+// DMA SPI complete callback
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi){
+    if (hspi->Instance == SPI1){
+        spi_dma_slave_receive_finished();
+    }
+}
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
+    if (hspi->Instance == SPI1){
+        spi_dma_slave_transmit_finished();
+    }
+}
+
+const uint16_t async_sd_writing_timeout_ms = 5000;
 
 int main(void){
     HAL_Init();
@@ -121,43 +142,31 @@ int main(void){
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
-
-
-    spi_bit_bang_initialize(
-        GPIOA, GPIO_PIN_4, 
-        GPIOA, GPIO_PIN_5, 
-        GPIOA, GPIO_PIN_7, 
-        GPIOA, GPIO_PIN_6);
+    
+    volatile uint8_t status = spi_dma_slave_init(
+        SPI1, 
+        DMA2_Stream0, 
+        DMA_CHANNEL_3, 
+        DMA2_Stream2, 
+        DMA_CHANNEL_2,
+        GPIOA,
+        GPIO_PIN_4,
+        GPIOA,
+        GPIO_PIN_5,
+        GPIOA,
+        GPIO_PIN_7,
+        GPIOA,
+        GPIO_PIN_6
+    );
 
     while (1){
         // Turn off debugging led
-        // HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-        uint8_t spi_slave_result_receive = spi_bit_bang_receive(slave_buffer, 1, 1000);
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+
+        printf("asasdasdaaaa"); // Delay, otherwise RX DMA gets TX DMA master transfer garbage
+        volatile uint8_t spi_slave_result_receive = spi_dma_slave_receive(slave_buffer, 1, 1000);
 
         if(spi_slave_result_receive){
-            // Turn on led for quick debugging
-            // HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-
-            // Log command on the MISO line of SPI1
-            // This does not affect the spi communication besides making it a bit slower
-            // for(uint8_t i = 0; i < 8; i++){
-            //     uint8_t MISO_state = (slave_buffer[0] >> (7 - i)) & 0x01;
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
-
-            //     volatile uint32_t count = 0;
-
-            //     for(count = 0; count< 50; count++);
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, MISO_state);
-            //     for(count = 0; count< 50; count++);
-            //     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
-            //     for(count = 0; count< 50; count++);
-            // }
-            // Pull the MISO pin low
-            // HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
-
             slave_set_busy();
             switch (slave_buffer[0])
             {
@@ -169,7 +178,8 @@ int main(void){
                         result & 0xFF
                     };
                     slave_set_free();
-                    spi_bit_bang_transmit(result_array, 2, 1000);
+                    spi_dma_slave_transmit(result_array, 2, 1000);
+
                     break;
                 }
                 case LOGGER_SD_BUFFER_CLEAR:
@@ -177,21 +187,21 @@ int main(void){
                     sd_buffer_clear();
                     uint8_t result = 1; // Just to confirm that it is completed
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_CARD_INITIALIZE:
                 {
                     uint8_t result = sd_card_initialize();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_OPEN_FILE:
                 {
                     // We ask how much data should we receive. 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
 
 
@@ -199,7 +209,7 @@ int main(void){
 
                     // Receive the instruction and file name
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
 
 
@@ -208,11 +218,11 @@ int main(void){
 
                     uint8_t result = sd_open_file(extracted_string, slave_buffer[0]);
                     slave_set_free();
-                    if(!spi_bit_bang_transmit(&result, 1, 1000)) break;
+                    if(!spi_dma_slave_transmit(&result, 1, 1000)) break;
                     // slave_set_busy();
 
                     // slave_set_free();
-                    // spi_bit_bang_transmit(slave_buffer, amount_of_data_to_receive, 1000);
+                    // spi_dma_slave_transmit(slave_buffer, amount_of_data_to_receive, 1000);
                     free(extracted_string);
                     break;
                 }
@@ -220,21 +230,21 @@ int main(void){
                 {   
                     // We ask how much data should we receive. 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
 
                     uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the data
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
 
                     char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
 
                     uint8_t result = sd_write_string_data_to_file(extracted_string);
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     free(extracted_string);
                     break;
                 }
@@ -242,14 +252,14 @@ int main(void){
                 {
                     uint8_t result = sd_read_data_from_file();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_SET_FILE_CURSOR_OFFSET:
                 {
                     // Receive 4 bytes because need 32 bit number
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 4, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 4, 1000)) break;
                     slave_set_busy();
 
                     uint32_t number = (slave_buffer[0] << 24) | 
@@ -260,34 +270,34 @@ int main(void){
                     uint8_t result = sd_set_file_cursor_offset(number);
 
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_CLOSE_FILE:
                 {
                     uint8_t result = sd_close_file();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_CARD_DEINITIALIZE:
                 {
                     uint8_t result = sd_card_deinitialize();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_CARD_APPEND_TO_BUFFER:
                 {
                     // We ask how much data should we receive. 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
                     uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the data
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
                     char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
 
@@ -295,7 +305,7 @@ int main(void){
                     free(extracted_string);
                     uint8_t result = 1; // Just to confirm that it is completed
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_GET_BUFFER_POINTER:
@@ -310,7 +320,7 @@ int main(void){
 
                     // Tell how much data will be sent
                     slave_set_free();
-                    if(!spi_bit_bang_transmit(amount_of_data_to_transmit_bytes, 2, 1000)){
+                    if(!spi_dma_slave_transmit(amount_of_data_to_transmit_bytes, 2, 1000)){
                         free(extracted_string);
                         break;
                     }
@@ -324,7 +334,7 @@ int main(void){
 
                     // Send the data
                     slave_set_free();
-                    spi_bit_bang_transmit((uint8_t*)extracted_string, amount_of_data_to_transmit, 1000);
+                    spi_dma_slave_transmit((uint8_t*)extracted_string, amount_of_data_to_transmit, 1000);
                     free(extracted_string);
                     break;
                 }
@@ -340,42 +350,42 @@ int main(void){
 
                     // It knows to receive 4 bytes
                     slave_set_free();
-                    spi_bit_bang_transmit(result_array, 4, 100);
+                    spi_dma_slave_transmit(result_array, 4, 100);
                     break;
                 }
                 case LOGGER_SD_WRITE_BUFFER_TO_FILE:
                 {
                     uint8_t result = sd_write_buffer_to_file();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 100);
+                    spi_dma_slave_transmit(&result, 1, 100);
                     break;
                 }
                 case LOGGER_SD_FILE_EXISTS:
                 {
                     // We ask how much data should we receive. 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
 
                     slave_set_busy();
                     uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the file name
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
                     char* extracted_string = extract_string_from_spi_data_at_index(slave_buffer, SLAVE_BUFFER_SIZE, 0);
 
                     uint8_t result = sd_file_exists(extracted_string);
                     free(extracted_string);
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_SD_SAVE_FILE:
                 {
                     uint8_t result = sd_save_file();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 
@@ -384,14 +394,14 @@ int main(void){
                 {
                     // We ask how much data should we receive. 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
 
                     volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the base file name
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
 
                     uint8_t result_sd_initialize = sd_card_initialize();
@@ -421,7 +431,7 @@ int main(void){
 
                     slave_set_free();
                     uint8_t result = sd_get_result();
-                    if(!spi_bit_bang_transmit(&result, 1, 1000)) break;
+                    if(!spi_dma_slave_transmit(&result, 1, 1000)) break;
                     break;
                 }
                 case LOGGER_GET_FILE_INDEX:
@@ -431,7 +441,7 @@ int main(void){
                     uint8_t response[] = {log_file_index_msb, log_file_index_lsb};
 
                     slave_set_free();
-                    spi_bit_bang_transmit(response, 2, 1000);
+                    spi_dma_slave_transmit(response, 2, 1000);
                     break;
                 }
 
@@ -439,16 +449,13 @@ int main(void){
                 {   
                     // Reset file name stuff
                     log_file_index = 1;
-                    log_file_base_name[0] = 0; // terminate the string
                     log_file_name[0] = 0; // terminate the string
                     log_file_location_found = 0;
-                    sd_card_initialized = 0;
-                    log_loop_count = 0;
 
                     sd_close_file(); // Dont care about the result of this. Just try to close it.
                     uint8_t result = sd_card_deinitialize();
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
 
                     break;
                 }
@@ -456,14 +463,14 @@ int main(void){
                 {
 
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
 
                     volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the base file name
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
 
                     // The result of this one is weird, ignore it
@@ -471,20 +478,20 @@ int main(void){
                     uint8_t result_save  = sd_save_file();
 
                     slave_set_free();
-                    spi_bit_bang_transmit(&result_save, 1, 1000);
+                    spi_dma_slave_transmit(&result_save, 1, 1000);
                     break;
                 }
                 case LOGGER_WRITE_CHUNK_OF_BYTE_DATA:
                 {
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, 2, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, 2, 1000)) break;
                     slave_set_busy();
 
                     volatile uint16_t amount_of_data_to_receive = (slave_buffer[0] << 8) | slave_buffer[1];
 
                     // Receive the base file name
                     slave_set_free();
-                    if(!spi_bit_bang_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
+                    if(!spi_dma_slave_receive(slave_buffer, amount_of_data_to_receive, 1000)) break;
                     slave_set_busy();
 
                     // The result of this one is weird, ignore it
@@ -492,7 +499,7 @@ int main(void){
                     uint8_t result_save  = sd_save_file();
 
                     slave_set_free();
-                    spi_bit_bang_transmit(&result_save, 1, 1000);
+                    spi_dma_slave_transmit(&result_save, 1, 1000);
                     break;
                 }
 
@@ -500,129 +507,300 @@ int main(void){
                 {
                     uint8_t result = LOGGER_INTERFACE_TEST_VALUE;
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_TEST_INTERFACE_BROKEN:
                 {
-                    // The logger understands that the spi of the master is stupid
+                    // The logger understands that the spi of the master is stupid and sends the wrong value the first time
                     uint8_t result = LOGGER_INTERFACE_TEST_VALUE;
-                    // spi_bit_bang_set_start_skip_bits(1); // Data is shifted to the right by one so start looking for that last bit instead
+                    // spi_dma_slave_set_start_skip_bits(1); // Data is shifted to the right by one so start looking for that last bit instead
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
                     break;
                 }
                 case LOGGER_ENTER_ASYNC_STRING_MODE:
                 {
-
                     uint8_t result = 1;
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
 
                     // Clean both buffers for leftover data
-                    spi_bit_bang_reset_non_active_receive_buffer();
-                    spi_bit_bang_wipe_non_active_receive_buffer();
-                    spi_bit_bang_swap_receive_async_buffer();
-                    spi_bit_bang_reset_non_active_receive_buffer();
-                    spi_bit_bang_wipe_non_active_receive_buffer();
-                    spi_bit_bang_swap_receive_async_buffer();
+                    spi_dma_slave_reset_non_active_receive_buffer();
+                    spi_dma_slave_wipe_non_active_receive_buffer();
+                    spi_dma_slave_swap_receive_async_buffer();
+                    spi_dma_slave_reset_non_active_receive_buffer();
+                    spi_dma_slave_wipe_non_active_receive_buffer();
+                    spi_dma_slave_swap_receive_async_buffer();
 
-                    // slave_set_busy(); // For debugging from the master side. Master uses this pin to see when it is active
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
+                    // Timer to wait for 5s before stopping async mode
+                    uint32_t timer_start_miliseconds = HAL_GetTick();
+
+                    // Debugging
+                    const uint8_t write_error_codes_size = 20;
+                    uint8_t write_error_codes[write_error_codes_size];
+                    memset(write_error_codes, 0, write_error_codes_size);
+                    uint8_t write_error_codes_index = 0;
+
+                    const uint8_t save_error_codes_size = 20;
+                    uint8_t save_error_codes[save_error_codes_size];
+                    memset(save_error_codes, 0, save_error_codes_size);
+                    uint8_t save_error_codes_index = 0;
+
+                    spi_dma_slave_receive_async();
                     while(1){
-                        //Reset the slave buffer
-                        slave_buffer[0] = 0;
 
-                        // Swap the receive buffers so receive can happen while sd write is happening
-                        spi_bit_bang_swap_receive_async_buffer();
-                        spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer, 1);
-                        uint16_t data_size = strlen((char*)slave_buffer);
+                        // Wait for slave not to be selected
+                        sda_wait_for_slave_select_state(0);
+
+                        // Calculate received bytes
+                        sda_update_how_many_bytes_received_async_dma();
+
+                        // Get received bytes for selected buffer
+                        uint16_t active_buffer_size = spi_dma_slave_get_active_buffer_size(1);
+
+                        if(HAL_GetTick() - timer_start_miliseconds > async_sd_writing_timeout_ms){
+                            break;
+                        }
+                        
+                        if(active_buffer_size == 0){
+                            // If bytes is zero then continue receiving DMA
+                            continue;
+                        }
+
+                        // Reset the timer
+                        timer_start_miliseconds = HAL_GetTick();
+
+                        // Wait for slave to be not selected again, as it can be that it was
+                        sda_wait_for_slave_select_state(0);
+
+                        // Calculate received bytes again
+                        sda_update_how_many_bytes_received_async_dma();
+                        
+                        // Stop DMA
+                        sds_stop_dma_rx();
+
+                        // Clean up the other buffer
+                        spi_dma_slave_reset_non_active_receive_buffer();
+
+                        // Switch buffer to the cleaned up one
+                        spi_dma_slave_swap_receive_async_buffer();
+
+                        // Start DMA RX again
+                        spi_dma_slave_receive_async();
+
+                        // Get the non active buffer size
+                        uint16_t non_active_buffer_size = spi_dma_slave_get_non_active_buffer_size(1); 
+
+                        // Get the cleaned up data
+                        spi_dma_slave_read_receive_async_response_form_non_active_buffer(slave_buffer, SLAVE_BUFFER_SIZE, 1);
+
+
+                        // Check if the master wants to stop the async RX
+                        if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
+                            // Clean up everything
+                            
+                            // SIgnal that slave got the message
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+                            HAL_Delay(250);
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+                            HAL_Delay(250);
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+
+                            spi_dma_slave_hard_cancel_receive_async();
+                            slave_set_free();
+                            spi_dma_slave_transmit(&result, 1, 1000);
+                            break;
+                        }
+
+
+                        // Indicate that slave is busy
                         slave_set_busy();
-                        if(data_size != 0){
-                            // Debugging
-                            // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
-                            // printf("String - %d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size()-1);
+                        if(!sd_check_file_is_valid()){
+                            uint8_t attempts_max = 20;
+                            uint8_t attempts_made = 0;
 
-                            // Check if master wants this async stuff to stop
-                            if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
-                                // Clean up everything
-                                spi_bit_bang_hard_cancel_receive_async();
-                                slave_set_free();
-                                spi_bit_bang_transmit(&result, 1, 1000);
-                                break;
+                            while(attempts_max > attempts_made && !sd_open_file(log_file_name, FA_WRITE)){
+                                HAL_Delay(5);
+                                attempts_made++;
                             }
 
-
-                            // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.
-                            // Only the first message would be put on the sd card. Need to detect if in the lenght of the data there are more than one '\0'
-                            // Perform write to sd card
-                            sd_write_string_data_to_file((char*)slave_buffer);
-                            sd_save_file();
-                            // Consider checking if the result of save is good to continue operation
+                            if(attempts_made > attempts_max){
+                                __disable_irq();
+                                printf("failed to open it");
+                                while(1);
+                            }
                         }
-                        spi_bit_bang_reset_non_active_receive_buffer();
 
-                        spi_bit_bang_receive_async();
+                        // Start writing data to SD card
+                        volatile uint8_t result = 0;
+                        volatile uint8_t write_status = sd_write_byte_data_to_file((char*)slave_buffer, non_active_buffer_size);
+                        result = sd_get_result();
+                        if(write_error_codes_index < write_error_codes_size && !value_in_array(write_error_codes, write_error_codes_size, result)){
+                            write_error_codes[write_error_codes_index] = result;
+                            write_error_codes_index++;
+                        }
+
+                        // FR_INVALID_OBJECT
+                        // Save it
+                        volatile uint8_t save_status = sd_save_file();
+                        result = sd_get_result();
+                        if(save_error_codes_index < save_error_codes_size && !value_in_array(save_error_codes, save_error_codes_size, result)){
+                            save_error_codes[save_error_codes_index] = result;
+                            save_error_codes_index++;
+                        }
+
+                        // Indicate that slave is not busy anymore
+                        slave_set_free();
+
                     }
+
+                    // Turn of the led if this functionality is not on anymore
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
                     break;
                 }
                 case LOGGER_ENTER_ASYNC_BYTE_MODE:
                 {
                     uint8_t result = 1;
                     slave_set_free();
-                    spi_bit_bang_transmit(&result, 1, 1000);
+                    spi_dma_slave_transmit(&result, 1, 1000);
 
                     // Clean both buffers for leftover data
-                    spi_bit_bang_reset_non_active_receive_buffer();
-                    spi_bit_bang_wipe_non_active_receive_buffer();
-                    spi_bit_bang_swap_receive_async_buffer();
-                    spi_bit_bang_reset_non_active_receive_buffer();
-                    spi_bit_bang_wipe_non_active_receive_buffer();
-                    spi_bit_bang_swap_receive_async_buffer();
+                    spi_dma_slave_reset_non_active_receive_buffer();
+                    spi_dma_slave_wipe_non_active_receive_buffer();
+                    spi_dma_slave_swap_receive_async_buffer();
+                    spi_dma_slave_reset_non_active_receive_buffer();
+                    spi_dma_slave_wipe_non_active_receive_buffer();
+                    spi_dma_slave_swap_receive_async_buffer();
 
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+
+                    // Timer to wait for 5s before stopping async mode
+                    uint32_t timer_start_miliseconds = HAL_GetTick();
+
+                    // Debugging
+                    const uint8_t write_error_codes_size = 20;
+                    uint8_t write_error_codes[write_error_codes_size];
+                    memset(write_error_codes, 0, write_error_codes_size);
+                    uint8_t write_error_codes_index = 0;
+
+                    const uint8_t save_error_codes_size = 20;
+                    uint8_t save_error_codes[save_error_codes_size];
+                    memset(save_error_codes, 0, save_error_codes_size);
+                    uint8_t save_error_codes_index = 0;
+
+                    spi_dma_slave_receive_async();
                     while(1){
-                        //Reset the slave buffer
-                        slave_buffer[0] = 0;
 
-                        // Swap the receive buffers so receive can happen while sd write is happening
-                        spi_bit_bang_swap_receive_async_buffer();
-                        spi_bit_bang_read_receive_async_response_form_non_active_buffer(slave_buffer, 0);
+                        // Wait for slave not to be selected
+                        sda_wait_for_slave_select_state(0);
 
-                        slave_set_free();
+                        // Calculate received bytes
+                        sda_update_how_many_bytes_received_async_dma();
 
-                        uint16_t data_size = spi_bit_bang_get_non_active_buffer_size();
-                        slave_set_busy();
-                        if(data_size != 0){
-                            // Debugging
-                            // printf("String - %d '%s' actual size - %d\n", data_size, slave_buffer, spi_bit_bang_get_non_active_buffer_size());
-                            printf("%d / %d\n", data_size, spi_bit_bang_get_non_active_buffer_size());
+                        // Get received bytes for selected buffer
+                        uint16_t active_buffer_size = spi_dma_slave_get_active_buffer_size(1);
 
-                            // Check if master wants this async stuff to stop
-                            if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
-                                // Clean up everything
-                                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-                                HAL_Delay(250);
-                                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-                                spi_bit_bang_hard_cancel_receive_async();
-                                slave_set_free();
-                                spi_bit_bang_transmit(&result, 1, 1000);
-                                break;
-                            }
-
-
-                            // TODO: Check if there is an issue with '\0' terminators when there are more than one message in the receive buffer.
-                            // Only the first message would be put on the sd card. Need to detect if in the lenght of the data there are more than one '\0'
-                            // Perform write to sd card
-                            sd_write_byte_data_to_file((char*)slave_buffer, data_size);
-                            sd_save_file();
-                            // Consider checking if the result of save is good to continue operation
+                        if(HAL_GetTick() - timer_start_miliseconds > async_sd_writing_timeout_ms){
+                            break;
                         }
 
-                        spi_bit_bang_reset_non_active_receive_buffer();
+                        if(active_buffer_size == 0){
+                            // If bytes is zero then continue receiving DMA
+                            continue;
+                        }
+
+                        // Reset the timer
+                        timer_start_miliseconds = HAL_GetTick();
+
+                        // Wait for slave to be not selected again, as it can be that it was
+                        sda_wait_for_slave_select_state(0);
+
+                        // Calculate received bytes again
+                        sda_update_how_many_bytes_received_async_dma();
+                        
+                        // Stop DMA
+                        sds_stop_dma_rx();
+
+                        // Clean up the other buffer
+                        spi_dma_slave_reset_non_active_receive_buffer();
+
+                        // Switch buffer to the cleaned up one
+                        spi_dma_slave_swap_receive_async_buffer();
+
+                        // Start DMA RX again
+                        spi_dma_slave_receive_async();
+
+                        // Get the non active buffer size
+                        uint16_t non_active_buffer_size = spi_dma_slave_get_non_active_buffer_size(1); 
+
+                        // Get the cleaned up data
+                        spi_dma_slave_read_receive_async_response_form_non_active_buffer(slave_buffer, SLAVE_BUFFER_SIZE, 0);
+
+
+                        // Check if the master wants to stop the async RX
+                        if(slave_buffer[0] == LOGGER_LEAVE_ASYNC_MODE){
+                            // Clean up everything
+                            
+                            // SIgnal that slave got the message
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+                            HAL_Delay(250);
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+                            HAL_Delay(250);
+                            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+
+                            spi_dma_slave_hard_cancel_receive_async();
+                            slave_set_free();
+                            spi_dma_slave_transmit(&result, 1, 1000);
+                            break;
+                        }
+
+
+                        // Indicate that slave is busy
+                        slave_set_busy();
+                        if(!sd_check_file_is_valid()){
+                            uint8_t attempts_max = 20;
+                            uint8_t attempts_made = 0;
+
+                            while(attempts_max > attempts_made && !sd_open_file(log_file_name, FA_WRITE)){
+                                HAL_Delay(5);
+                                attempts_made++;
+                            }
+
+                            if(attempts_made > attempts_max){
+                                __disable_irq();
+                                printf("failed to open it");
+                                while(1);
+                            }
+                        }
+
+                        // Start writing data to SD card
+                        volatile uint8_t result = 0;
+                        volatile uint8_t write_status = sd_write_byte_data_to_file((char*)slave_buffer, non_active_buffer_size);
+                        result = sd_get_result();
+                        if(write_error_codes_index < write_error_codes_size && !value_in_array(write_error_codes, write_error_codes_size, result)){
+                            write_error_codes[write_error_codes_index] = result;
+                            write_error_codes_index++;
+                        }
+
+                        // FR_INVALID_OBJECT
+                        // Save it
+                        volatile uint8_t save_status = sd_save_file();
+                        result = sd_get_result();
+                        if(save_error_codes_index < save_error_codes_size && !value_in_array(save_error_codes, save_error_codes_size, result)){
+                            save_error_codes[save_error_codes_index] = result;
+                            save_error_codes_index++;
+                        }
+
+                        // Indicate that slave is not busy anymore
                         slave_set_free();
 
-                        spi_bit_bang_receive_async();
                     }
+
+                    // Turn of the led if this functionality is not on anymore
+                    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
                     break;
                 }
                 default:
@@ -635,43 +813,7 @@ int main(void){
     }
 }
 
-void init_STM32_peripherals(){
-
-}
-
-void init_loop_timer(){
-    loop_start_time = HAL_GetTick();
-}
-
-void handle_loop_timing(){
-    loop_end_time = HAL_GetTick();
-    delta_loop_time = loop_end_time - loop_start_time;
-
-    printf("Tb: %dms ", delta_loop_time);
-    
-    int time_to_wait = (1000 / REFRESH_RATE_HZ) - delta_loop_time;
-    if (time_to_wait > 0)
-    {
-        HAL_Delay(time_to_wait);
-    }
-
-    loop_end_time = HAL_GetTick();
-    delta_loop_time = loop_end_time - loop_start_time;
-    printf("Ta: %dms\n", delta_loop_time);
-
-    loop_start_time = HAL_GetTick();
-}
-
-// Print out how much time has passed since the start of the loop. To debug issues with performance
-void track_time(){
-    uint32_t delta_loop_time_temp = loop_end_time - loop_start_time;
-
-    printf("%5ld ms ", delta_loop_time_temp);
-}
-
 /* Auto generated shit again-----------------------------------------------*/
-
-
 
 /**
   * @brief System Clock Configuration
@@ -808,10 +950,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6|GPIO_PIN_15, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
@@ -823,23 +965,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA3 PA6 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_6;
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PA4 PA5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB0 PB1 */
@@ -873,11 +1002,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+//   HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+//   HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+//   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+//   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 }
 

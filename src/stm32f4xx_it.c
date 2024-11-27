@@ -53,7 +53,9 @@
 /* USER CODE BEGIN 0 */
 
 // Need to call the interrupts in this
-#include "../lib/spi-bit-bang/spi_bit_bang.h"
+// #include "../lib/spi-bit-bang/spi_bit_bang.h"
+#include "../lib/spi_dma_slave/spi_dma_slave.h"
+
 
 volatile uint8_t FatFsCnt = 0;
 volatile uint16_t Timer1, Timer2;
@@ -234,8 +236,9 @@ void EXTI4_IRQHandler(void)
   /* USER CODE BEGIN EXTI4_IRQn 1 */
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET)
     {
+        sds_handle_slave_select();
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
-        spi_bit_bang_ss_interrupt();
+        // spi_bit_bang_ss_interrupt();
     }
 
   /* USER CODE END EXTI4_IRQn 1 */
@@ -254,7 +257,7 @@ void EXTI9_5_IRQHandler(void)
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_5) != RESET)
     {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_5);
-        spi_bit_bang_clk_interrupt();
+        // spi_bit_bang_clk_interrupt();
     }
   /* USER CODE END EXTI9_5_IRQn 1 */
 }
