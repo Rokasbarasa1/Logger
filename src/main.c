@@ -44,7 +44,7 @@ uint8_t log_file_location_found = 0;
 uint8_t log_loop_count = 0;
 
 // SPI slave stuff functionality
-#define SLAVE_BUFFER_SIZE 30000
+#define SLAVE_BUFFER_SIZE 30000 // Has to be equal to the SPI slave driver buffers
 uint8_t slave_buffer[SLAVE_BUFFER_SIZE];
 
 // Check if value is in an array already
@@ -562,6 +562,14 @@ int main(void){
                         uint16_t active_buffer_size = spi_dma_slave_get_active_buffer_size(1);
 
                         if(HAL_GetTick() - timer_start_miliseconds > async_sd_writing_timeout_ms){
+                            // Reset everything as the master is not there
+                            // Reset file name stuff
+                            log_file_index = 1;
+                            log_file_name[0] = 0; // terminate the string
+                            log_file_location_found = 0;
+
+                            sd_close_file(); // Dont care about the result of this. Just try to close it.
+                            sd_card_deinitialize();
                             break;
                         }
                         
@@ -609,6 +617,7 @@ int main(void){
                             HAL_Delay(250);
                             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 
+                            log_file_index = 1; // Reset index
                             spi_dma_slave_hard_cancel_receive_async();
                             slave_set_free();
                             spi_dma_slave_transmit(&result, 1, 1000);
@@ -704,6 +713,14 @@ int main(void){
                         uint16_t active_buffer_size = spi_dma_slave_get_active_buffer_size(1);
 
                         if(HAL_GetTick() - timer_start_miliseconds > async_sd_writing_timeout_ms){
+                            // Reset everything as the master is not there
+                            // Reset file name stuff
+                            log_file_index = 1;
+                            log_file_name[0] = 0; // terminate the string
+                            log_file_location_found = 0;
+
+                            sd_close_file(); // Dont care about the result of this. Just try to close it.
+                            sd_card_deinitialize();
                             break;
                         }
 
@@ -751,6 +768,7 @@ int main(void){
                             HAL_Delay(250);
                             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 
+                            log_file_index = 1; // Reset index
                             spi_dma_slave_hard_cancel_receive_async();
                             slave_set_free();
                             spi_dma_slave_transmit(&result, 1, 1000);
