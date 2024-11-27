@@ -4,10 +4,6 @@ SPI_HandleTypeDef hspi;
 DMA_HandleTypeDef hdma_spi_rx;
 DMA_HandleTypeDef hdma_spi_tx;
 
-#define BUFFER_SIZE 1024
-uint8_t rx_buffer[BUFFER_SIZE];
-volatile int data_length = 0;
-
 #define SPI_BIT_BANG_RECEIVE_BUFFER_SIZE 30000
 volatile uint8_t sds_receive_buffer_selected = 0; // 0- 1 buffer, 1- 2 buffer
 uint8_t receive_buffer0[SPI_BIT_BANG_RECEIVE_BUFFER_SIZE];
@@ -18,52 +14,45 @@ volatile uint16_t receiving_amount_of_bytes = 0;
 volatile uint8_t dma_rx_in_progress = 0;
 volatile uint16_t sds_receive_buffer0_index = 0;
 volatile uint16_t receive_buffer0_midway_bytes_added = 0;
-
 volatile uint16_t sds_receive_buffer1_index = 0;
 volatile uint16_t receive_buffer1_midway_bytes_added = 0;
-
-volatile uint16_t sds_skipped_bytes_buffer0 = 0;
-volatile uint16_t sds_skipped_bytes_buffer1 = 0;
+volatile uint16_t sds_skipped_bytes_buffer0 = 0; // How many bytes of string terminators are skipped
+volatile uint16_t sds_skipped_bytes_buffer1 = 0; // How many bytes of string terminators are skipped
 
 // SHared between both buffers 
 volatile uint16_t sds_receive_bytes_queue = 0;
-uint16_t sds_receive_bytes_queue_midway = 0;
+uint16_t sds_receive_bytes_queue_midway = 0; // If received bytes are read while DMA RX is in progress then the value is logged here
 
 #define SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE 1000
 uint8_t transmit_buffer[SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE];
-
 volatile uint16_t transmitting_amount_of_bytes = 0;
 
-
 volatile uint8_t dma_tx_in_progress = 0;
-
 volatile uint16_t sds_transmit_buffer_index = 0;
 volatile uint16_t sds_transmit_bytes_queue = 0;
 
 volatile uint8_t sds_slave_selected = 0;
 
 
-
-
-
+// SLave select
 GPIO_TypeDef* spi_dma_slave_SS_port;
 uint32_t spi_dma_slave_SS_pin;
 uint8_t spi_dma_slave_SS_pin_index;
 
-
-// INTERRUPT falling and rising
+// Clock pin
 GPIO_TypeDef* spi_dma_slave_CLK_port;
 uint32_t spi_dma_slave_CLK_pin;
 
-// INPUT 
+// MOSI Input
 GPIO_TypeDef* spi_dma_slave_MOSI_port;
 uint32_t spi_dma_slave_MOSI_pin;
 
-// OUTPUT
+// MISO Output
 GPIO_TypeDef* spi_dma_slave_MISO_port;
 uint32_t spi_dma_slave_MISO_pin;
 
 
+// Turn on the GPIO port clock based on the port
 void sda_enable_gpio_port(GPIO_TypeDef* port){
     if(port == GPIOA) __HAL_RCC_GPIOA_CLK_ENABLE();
     else if(port == GPIOB) __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -71,6 +60,7 @@ void sda_enable_gpio_port(GPIO_TypeDef* port){
     else if(port == GPIOD) __HAL_RCC_GPIOD_CLK_ENABLE();
 }
 
+// Initialize a gpio pin as a SPI functional pin
 void sda_init_pin_as_spi(GPIO_TypeDef* port, uint16_t pin, SPI_TypeDef *spi_peripheral){
     GPIO_InitTypeDef GPIO_InitStruct = {0};
     GPIO_InitStruct.Pin = pin;
@@ -86,8 +76,10 @@ void sda_init_pin_as_spi(GPIO_TypeDef* port, uint16_t pin, SPI_TypeDef *spi_peri
     HAL_GPIO_Init(port, &GPIO_InitStruct);
 }
 
+// Needed to determine pin position for setting up interrupts without HAL
 #define PIN_POSITION(pin) (__builtin_ctz(pin))
 
+// Initialize the SPI, DMA RX AND TX, by passing SPI, DMA and gpio pins 
 uint8_t spi_dma_slave_init(
     SPI_TypeDef *spi_peripheral, 
     DMA_Stream_TypeDef *rx_dma_instance_stream, 
@@ -245,19 +237,22 @@ uint8_t spi_dma_slave_init(
     return 1;
 }
 
+// Check if the slave is selected
 uint8_t spi_dma_slave_is_sds_slave_selected(){
     return sds_slave_selected;
 }
 
+// DMA RX handle for the DMA callback
 DMA_HandleTypeDef* spi_dma_slave_get_dma_rx_handle(){
     return &hdma_spi_rx;
 }
 
+// DMA TX handle for the DMA callback
 DMA_HandleTypeDef* spi_dma_slave_get_dma_tx_handle(){
     return &hdma_spi_tx;
 }
 
-
+// Start a DMA RX
 void spi_dma_slave_rx(uint8_t * buffer, uint16_t amount_of_data_to_receive){
     volatile HAL_StatusTypeDef status;
     receiving_amount_of_bytes = amount_of_data_to_receive;
@@ -274,6 +269,7 @@ void spi_dma_slave_rx(uint8_t * buffer, uint16_t amount_of_data_to_receive){
     dma_rx_in_progress = 1;
 }
 
+// Start a DMA TX
 void spi_dma_slave_tx(uint8_t * buffer, uint16_t amount_of_data_to_transfer){
     volatile HAL_StatusTypeDef status;
     transmitting_amount_of_bytes = amount_of_data_to_transfer;
@@ -290,6 +286,7 @@ void spi_dma_slave_tx(uint8_t * buffer, uint16_t amount_of_data_to_transfer){
     dma_tx_in_progress = 1;
 }
 
+// DMA RX finished interrupt handler
 void spi_dma_slave_receive_finished(){
     uint32_t count =  receiving_amount_of_bytes - __HAL_DMA_GET_COUNTER(hspi.hdmarx);;
     sds_receive_bytes_queue = sds_receive_bytes_queue - (count - sds_receive_bytes_queue_midway) ;
@@ -307,6 +304,7 @@ void spi_dma_slave_receive_finished(){
     receiving_amount_of_bytes = 0;
 }
 
+// DMA TX finished interrupt handler
 void spi_dma_slave_transmit_finished(){
     uint32_t count = transmitting_amount_of_bytes - __HAL_DMA_GET_COUNTER(hspi.hdmatx);
     sds_transmit_bytes_queue = sds_transmit_bytes_queue - count;
@@ -316,7 +314,7 @@ void spi_dma_slave_transmit_finished(){
     transmitting_amount_of_bytes = 0;
 }
 
-    
+// Code that aborts the DAM RX AND TX. Some code added to fix the broken HAL version of abort
 void spi_dma_slave_abort_rx_and_tx_dma(){
 
     // Do no stop it if there is nothing to stop
@@ -392,7 +390,8 @@ void spi_dma_slave_abort_rx_and_tx_dma(){
     }
 }
 
-void sds_clear_spi_queues(){
+// Stop all spi dma activity and reset everything
+void sds_stop_all_dma(){
 
     spi_dma_slave_abort_rx_and_tx_dma();
 
@@ -419,6 +418,7 @@ void sds_clear_spi_queues(){
     sds_transmit_bytes_queue = 0;
 }
 
+// Block until the receive queue is empty. Timeout if it takes to long and reset the DMA RX TX
 uint8_t sds_wait_for_receive_queue_empty(uint16_t timeout_ms){
     uint32_t start_time = HAL_GetTick();
     uint32_t delta_time = 0;
@@ -426,13 +426,14 @@ uint8_t sds_wait_for_receive_queue_empty(uint16_t timeout_ms){
     while(sds_receive_bytes_queue != 0 && (delta_time = (HAL_GetTick() - start_time)) < timeout_ms);
 
     if(delta_time >= timeout_ms){
-        sds_clear_spi_queues();
+        sds_stop_all_dma();
         return 0;
     }
 
     return 1;
 }
 
+// Block until the transmit queue is empty. Timeout if it takes to long and reset the DMA RX TX
 uint8_t sds_wait_for_transmit_queue_empty(uint16_t timeout_ms){
     uint32_t start_time = HAL_GetTick();
     uint32_t delta_time = 0;
@@ -446,7 +447,7 @@ uint8_t sds_wait_for_transmit_queue_empty(uint16_t timeout_ms){
     }
 
     if(delta_time >= timeout_ms){
-        sds_clear_spi_queues();
+        sds_stop_all_dma();
 
         return 0;
     }
@@ -454,18 +455,19 @@ uint8_t sds_wait_for_transmit_queue_empty(uint16_t timeout_ms){
     return 1;
 }
 
+// Reset the buffer data and the index of the active buffer
 void sds_clear_residual_data(){
     if (sds_receive_buffer_selected == 0) {
         receive_buffer0[0] = 0;
-        // memset(receive_buffer0, 0, SPI_BIT_BANG_RECEIVE_BUFFER_SIZE);
+        // no need to wipe all data
         sds_receive_buffer0_index = 0;
     } else {
         receive_buffer1[0] = 0;
-        // memset(receive_buffer1, 0, SPI_BIT_BANG_RECEIVE_BUFFER_SIZE);
         sds_receive_buffer1_index = 0;
     }
 }
 
+// Clear the flags from the previous RX or TX
 void sds_check_and_clear_overrun_error(){
     // Check for overrun error
     if (__HAL_SPI_GET_FLAG(&hspi, SPI_FLAG_OVR)) {
@@ -474,12 +476,13 @@ void sds_check_and_clear_overrun_error(){
     }
 }
 
+// Try to flushe whatever is in the DR register of the SPI. This is needed, because sometimes the RX picks up data that was sent in the TX
 void sds_flush_dr_register(){
     volatile uint8_t temp = hspi.Instance->DR;
     temp = hspi.Instance->SR;
 }
 
-
+// Calback for the salve select pin interrupt on rising and falling
 void sds_handle_slave_select(){
     // Toggle the salve select
     if (sds_slave_selected == 0) {
@@ -489,7 +492,7 @@ void sds_handle_slave_select(){
     }
 }
 
-
+// Initiate a blcoking DMA RX
 uint8_t spi_dma_slave_receive(uint8_t * receive_data, uint16_t receive_data_size, uint16_t timeout_ms){
     if(receive_data_size >= SPI_BIT_BANG_RECEIVE_BUFFER_SIZE){
         return 0;
@@ -502,8 +505,6 @@ uint8_t spi_dma_slave_receive(uint8_t * receive_data, uint16_t receive_data_size
     sds_check_and_clear_overrun_error();
     sds_flush_dr_register();
 
-    // READ THE DR register of SPI to clear the data it has there
-    // HAL_SPI_DMAStop(&hspi);
     if(sds_receive_buffer_selected == 0){
         spi_dma_slave_rx(receive_buffer0, sds_receive_bytes_queue);
     }else{
@@ -531,6 +532,7 @@ uint8_t spi_dma_slave_receive(uint8_t * receive_data, uint16_t receive_data_size
     return 1;
 }
 
+// Initiate a blocking DMA TX
 uint8_t spi_dma_slave_transmit(uint8_t * transmit_data, uint16_t transmit_data_size, uint16_t timeout_ms){
     if(transmit_data_size >= SPI_BIT_BANG_TRANSMIT_BUFFER_SIZE){
         return 0;
@@ -545,17 +547,10 @@ uint8_t spi_dma_slave_transmit(uint8_t * transmit_data, uint16_t transmit_data_s
 
     sds_transmit_bytes_queue = sds_transmit_bytes_queue + transmit_data_size;
 
-    // HAL_SPI_DMAStop(&hspi);
-    // dma_rx_in_progress = 0;
-    // receiving_amount_of_bytes = 0;
-
     spi_dma_slave_tx(transmit_buffer, sds_transmit_bytes_queue);
 
     if(!sds_wait_for_transmit_queue_empty(timeout_ms)) return 0;
 
-    // add a skip for receive as it is too quick
-    // Not relevant anymore as with more speed this is not problem? Or maybe because of mode 3.
-    // if(!wait_for_skips(timeout_ms)) return 0; // Skips are important for timing
     sds_transmit_buffer_index = sds_transmit_buffer_index - transmit_data_size;
 
     sds_clear_residual_data();
@@ -563,6 +558,7 @@ uint8_t spi_dma_slave_transmit(uint8_t * transmit_data, uint16_t transmit_data_s
     return 1;
 }
 
+// Reset everything about the non active buffer so another transfer can be made to it.
 uint8_t spi_dma_slave_reset_non_active_receive_buffer(){
     if(sds_receive_buffer_selected == 1){ // If 0 is selected then reset the 1
         sds_receive_buffer0_index = 0;
@@ -579,8 +575,9 @@ uint8_t spi_dma_slave_reset_non_active_receive_buffer(){
     return 1;
 }
 
+// Completely wipe the non active buffer by setting all values in it to zero
 uint8_t spi_dma_slave_wipe_non_active_receive_buffer(){
-    if(sds_receive_buffer_selected == 1){ // If 0 is selected then reset the 1
+    if(sds_receive_buffer_selected == 1){ // If 1 is selected then reset the 0 buffer
         for (uint16_t i = 0; i < SPI_BIT_BANG_RECEIVE_BUFFER_SIZE; i++){
             receive_buffer0[i] = 0;
         }
@@ -593,6 +590,7 @@ uint8_t spi_dma_slave_wipe_non_active_receive_buffer(){
     return 1;
 }
 
+// Toggle which buffer is the active one. It will block until slave is not selected
 uint8_t spi_dma_slave_swap_receive_async_buffer(){
     while (sds_slave_selected); // Wait for slave not to be selected
     if(sds_receive_buffer_selected == 0){
@@ -603,15 +601,8 @@ uint8_t spi_dma_slave_swap_receive_async_buffer(){
     return 1;
 }
 
-void spi_dma_slave_wait_for_slave_deselect_and_stop_receive(){
-    while (sds_slave_selected); // Wait for slave not to be selected
-
-    spi_dma_slave_update_bytes_received();
-
-}
-
-//
-void sds_stop_dma_rx(){
+// Stop the async DMA RX
+void sds_stop_async_dma_rx(){
     spi_dma_slave_abort_rx_and_tx_dma();
 
     transmitting_amount_of_bytes = 0;
@@ -621,6 +612,7 @@ void sds_stop_dma_rx(){
     sds_receive_bytes_queue_midway = 0;
 }
 
+// Update the bytes received while being already in a async DMA RX
 void spi_dma_slave_update_bytes_received(){
     // Only update if the receive is in progress
     // Might not be used at all but nice to  have just in case
@@ -650,19 +642,19 @@ void spi_dma_slave_update_bytes_received(){
     }
 }
 
-
-
 // Loads the data from the spi buffers to the provided buffer, optional feature of 
 uint8_t spi_dma_slave_read_receive_async_response_form_non_active_buffer(uint8_t * receive_data, uint16_t receive_data_size, uint8_t skip_zeros){
 
-    // make sure the destination 
+    // Make sure the destination buffer has the same amount of storage. Otherwise stop everything
     if(receive_data_size != SPI_BIT_BANG_RECEIVE_BUFFER_SIZE){
         printf("receive_data size is too small to keep all the data\n");
         while(1);
     }
 
-    // SKIP BYTES THAT ARE 0 BEFORE THE END THAT WAY YOU DONT HAVE TO LOOK FOR THEM AFTERWARDS
-    // AND DONT HAVE TO MODIFY THE ARRAY
+    // Skip bytes is the count of how many string terminator characters are in the buffer. There can only be one and it has to be at the end of the buffer index
+
+    // If we just copy the buffer over to the new one. What is written to the sd card will be terminated with the first occuring string terminator.
+    // If that happens only the first log from the buffer will be written to sd card an not the rest.
 
     if(sds_receive_buffer_selected == 0){
         if(skip_zeros){
@@ -693,18 +685,10 @@ uint8_t spi_dma_slave_read_receive_async_response_form_non_active_buffer(uint8_t
     return 1;
 }
 
+
+// Stop the async DMA RX
 uint8_t spi_dma_slave_hard_cancel_receive_async(){
-    // Stop ongoing operation immediately
-    // Reset operation parameter
-    sds_receive_bytes_queue = 0;
-
-    // Abort transmit or receive
-    HAL_SPI_Abort(&hspi);
-
-    // Reset buffers
-    sds_receive_buffer0_index = 0;
-    sds_receive_buffer1_index = 0;
-    sds_receive_buffer_selected = 0;
+    sds_stop_all_dma();
 
     return 1;
 }

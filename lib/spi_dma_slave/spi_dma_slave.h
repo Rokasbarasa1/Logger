@@ -43,8 +43,7 @@ uint16_t spi_dma_slave_get_non_active_buffer_size(uint8_t skip_bytes);
 void sda_wait_for_slave_select_state(uint8_t state);
 void sda_update_how_many_bytes_received_async_dma();
 
-void spi_dma_slave_wait_for_slave_deselect_and_stop_receive();
-void sds_stop_dma_rx();
+void sds_stop_async_dma_rx();
 uint16_t spi_dma_slave_get_active_buffer_size(uint8_t skip_bytes);
 
 void sds_handle_slave_select();

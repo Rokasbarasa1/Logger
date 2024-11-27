@@ -580,7 +580,7 @@ int main(void){
                         sda_update_how_many_bytes_received_async_dma();
                         
                         // Stop DMA
-                        sds_stop_dma_rx();
+                        sds_stop_async_dma_rx();
 
                         // Clean up the other buffer
                         spi_dma_slave_reset_non_active_receive_buffer();
@@ -722,7 +722,7 @@ int main(void){
                         sda_update_how_many_bytes_received_async_dma();
                         
                         // Stop DMA
-                        sds_stop_dma_rx();
+                        sds_stop_async_dma_rx();
 
                         // Clean up the other buffer
                         spi_dma_slave_reset_non_active_receive_buffer();
