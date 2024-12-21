@@ -41,7 +41,6 @@ uint16_t log_file_index = 1;
 #define LOG_FILE_NAME_MAX 45
 char log_file_name[LOG_FILE_NAME_MAX];
 uint8_t log_file_location_found = 0;
-uint8_t log_loop_count = 0;
 
 // SPI slave stuff functionality
 #define SLAVE_BUFFER_SIZE 30000 // Has to be equal to the SPI slave driver buffers
@@ -672,9 +671,16 @@ int main(void){
                 }
                 case LOGGER_ENTER_ASYNC_BYTE_MODE:
                 {
+                    uint8_t reset_sd_when_async_stops = 0;
+                    slave_set_free();
+                    spi_dma_slave_receive(&reset_sd_when_async_stops, 1, 1000);
+                    slave_set_busy();
+
                     uint8_t result = 1;
                     slave_set_free();
                     spi_dma_slave_transmit(&result, 1, 1000);
+
+
 
                     // Clean both buffers for leftover data
                     spi_dma_slave_reset_non_active_receive_buffer();
@@ -768,7 +774,17 @@ int main(void){
                             HAL_Delay(250);
                             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 
+                            if(reset_sd_when_async_stops){
+                                log_file_name[0] = 0; // terminate the string
+                                log_file_location_found = 0;
+                                slave_buffer[0] = 0;
+
+                                sd_close_file(); // Dont care about the result of this. Just try to close it.
+                                sd_card_deinitialize();
+                            }
                             log_file_index = 1; // Reset index
+
+                            // clean the spi dma
                             spi_dma_slave_hard_cancel_receive_async();
                             slave_set_free();
                             spi_dma_slave_transmit(&result, 1, 1000);

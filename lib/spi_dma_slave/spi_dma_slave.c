@@ -398,24 +398,28 @@ void sds_stop_all_dma(){
     dma_rx_in_progress = 0;
     dma_tx_in_progress = 0;
 
-    if(sds_receive_buffer_selected == 0){
-        sds_receive_buffer0_index = 0;
-        receive_buffer0_midway_bytes_added = 0;
-        sds_skipped_bytes_buffer0 = 0;
-    }else{
-        sds_receive_buffer1_index = 0;
-        receive_buffer1_midway_bytes_added = 0;
-        sds_skipped_bytes_buffer1 = 0;
-    }
+    sds_receive_buffer_selected = 0;
 
-    transmitting_amount_of_bytes = 0;
+    receive_buffer0[0] = 0;
+    sds_receive_buffer0_index = 0;
+    receive_buffer0_midway_bytes_added = 0;
+    sds_skipped_bytes_buffer0 = 0;
+
+    receive_buffer1[0] = 0;
+    sds_receive_buffer1_index = 0;
+    receive_buffer1_midway_bytes_added = 0;
+    sds_skipped_bytes_buffer1 = 0;
+
     receiving_amount_of_bytes = 0;
 
     sds_receive_bytes_queue = 0;
     sds_receive_bytes_queue_midway = 0;
 
+    transmitting_amount_of_bytes = 0;
     sds_transmit_buffer_index = 0;
     sds_transmit_bytes_queue = 0;
+    transmit_buffer[0] = 0;
+
 }
 
 // Block until the receive queue is empty. Timeout if it takes to long and reset the DMA RX TX
@@ -692,6 +696,7 @@ uint8_t spi_dma_slave_hard_cancel_receive_async(){
 
     return 1;
 }
+
 
 // Start new async DMA RX. All other DMA RX have to be finished before starting
 uint8_t spi_dma_slave_receive_async(){
